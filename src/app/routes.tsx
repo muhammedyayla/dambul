@@ -4,6 +4,8 @@ import { RegisterScreen } from "./screens/RegisterScreen";
 import { CustomizeProfileScreen } from "./screens/CustomizeProfileScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
+import { LanguageSettingsScreen } from "./screens/LanguageSettingsScreen";
 import { isAuthed } from "./auth";
 
 function requireAuth() {
@@ -34,6 +36,16 @@ export const router = createBrowserRouter([
   {
     path: "/profile/:userId",
     Component: ProfileScreen,
+    loader: requireAuth,
+  },
+  {
+    path: "/settings",
+    Component: SettingsScreen,
+    loader: requireAuth,
+  },
+  {
+    path: "/settings/language",
+    Component: LanguageSettingsScreen,
     loader: requireAuth,
   },
 ]);

@@ -2,11 +2,17 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { SlidersHorizontal, X, Plus, Minus } from "lucide-react";
 import { Button } from "../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { mockUsers } from "../data/mockData";
+import { currentUser } from "../data/currentUser";
 import { UserDetailPopup } from "../components/UserDetailPopup";
 import { UserBottomSheet } from "../components/UserBottomSheet";
 import { motion, AnimatePresence } from "motion/react";
-import { setAuthed } from "../auth";
 
 export function MapScreen() {
   const navigate = useNavigate();
@@ -36,18 +42,32 @@ export function MapScreen() {
 
   return (
     <div className="h-screen w-full relative bg-zinc-950 overflow-hidden">
-      {/* Logout */}
-      <div className="absolute top-6 left-6 z-[1000]">
-        <Button
-          variant="outline"
-          className="h-12 rounded-2xl bg-zinc-900/60 border-zinc-800 hover:bg-zinc-800/60 text-white"
-          onClick={() => {
-            setAuthed(false);
-            navigate("/");
-          }}
-        >
-          Log out
-        </Button>
+      {/* Sağ üst: avatar + Settings menüsü */}
+      <div className="absolute top-6 right-6 z-[1000] flex flex-col items-center gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex flex-col items-center gap-1 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <div className="size-12 overflow-hidden rounded-full border-2 border-border bg-card ring-2 ring-accent/30">
+                <img
+                  src={currentUser.photo}
+                  alt=""
+                  className="size-full object-cover"
+                />
+              </div>
+              <span className="text-[11px] font-medium text-zinc-300">
+                Settings
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[10rem]">
+            <DropdownMenuItem onSelect={() => navigate("/settings")}>
+              Settings
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Map Background */}
@@ -125,11 +145,11 @@ export function MapScreen() {
         })}
       </div>
 
-      {/* Zoom Controls */}
+      {/* Zoom Controls — filtre butonunun üstünde */}
       <motion.div
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="absolute bottom-32 right-6 z-[1000] flex flex-col gap-2"
+        className="absolute bottom-28 right-6 z-[1000] flex flex-col gap-2"
       >
         <Button
           onClick={() => setZoom(Math.min(zoom + 0.2, 2))}
@@ -145,11 +165,11 @@ export function MapScreen() {
         </Button>
       </motion.div>
 
-      {/* Filter Button */}
+      {/* Filter Button — sağ alt */}
       <motion.div
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="absolute top-6 right-6 z-[1000]"
+        className="absolute bottom-6 right-6 z-[1000]"
       >
         <Button
           onClick={() => setShowFilters(!showFilters)}
@@ -159,14 +179,14 @@ export function MapScreen() {
         </Button>
       </motion.div>
 
-      {/* Filter Panel */}
+      {/* Filter Panel — filtre butonunun üstünde açılır */}
       <AnimatePresence>
         {showFilters && (
           <motion.div
-            initial={{ opacity: 0, x: 100 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 100 }}
-            className="absolute top-6 right-24 z-[1000] bg-zinc-900/95 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-zinc-800 min-w-[280px]"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            className="absolute bottom-24 right-6 z-[1000] bg-zinc-900/95 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-zinc-800 min-w-[280px]"
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-white">Filters</h3>
