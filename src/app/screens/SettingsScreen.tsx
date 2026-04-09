@@ -379,7 +379,7 @@ export function SettingsScreen() {
         </h2>
         <div className="divide-y divide-border rounded-2xl border border-border bg-card px-4">
           <SettingsRow
-            icon={Glob}
+            icon={Globe}
             label="Dilim"
             onClick={() => navigate("/settings/language")}
             right={
