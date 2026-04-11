@@ -1,0 +1,13 @@
+# Kopyalayıp .env olarak kaydedin. Gerçek anahtarları .env içinde tutun; bu dosyayı paylaşmayın.
+
+map_box_token=pk.xxx_MAPBOX
+neon_connection_string=postgresql://USER:SIFRE@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require
+ably_token=ably_xxx
+google_oauth_client_id=xxx.apps.googleusercontent.com
+google_oauth_client_secret=GOCSPX-xxx
+# redirect_uri_mismatch hatası: Aşağıdaki URI, Google Cloud Console’daki ile BİREBİR aynı olmalı (http, port 3001, sondaki / yok).
+# GOOGLE_CALLBACK_URL=http://localhost:3001/api/auth/google/callback
+# Console: APIs & Services → Kimlik bilgileri → OAuth 2.0 İstemci Kimliği → Yetkilendirilmiş yönlendirme URI’leri
+# Vercel Blob (yoksa yükleme yerel uploads/ klasörüne düşer)
+# BLOB_READ_WRITE_TOKEN=
+# PUBLIC_API_URL=http://localhost:3001

@@ -1,51 +1,68 @@
-import { createBrowserRouter, redirect } from "react-router";
+import { createBrowserRouter } from "react-router";
 import { LoginScreen } from "./screens/LoginScreen";
-import { RegisterScreen } from "./screens/RegisterScreen";
-import { CustomizeProfileScreen } from "./screens/CustomizeProfileScreen";
 import { MapScreen } from "./screens/MapScreen";
+import { OnboardingScreen } from "./screens/OnboardingScreen";
+import { SwipeScreen } from "./screens/SwipeScreen";
+import { ChatListScreen } from "./screens/ChatListScreen";
+import { ChatThreadScreen } from "./screens/ChatThreadScreen";
+import { SceneFeedScreen } from "./screens/SceneFeedScreen";
+import { ScenePostScreen } from "./screens/ScenePostScreen";
+import { NotificationsScreen } from "./screens/NotificationsScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { LanguageSettingsScreen } from "./screens/LanguageSettingsScreen";
-import { isAuthed } from "./auth";
-
-function requireAuth() {
-  if (!isAuthed()) {
-    throw redirect("/");
-  }
-  return null;
-}
+import { loginLoader, onboardingLoader, requireSession, rootLoader } from "./loaders/authLoaders";
 
 export const router = createBrowserRouter([
+  { path: "/", loader: rootLoader },
+  { path: "/login", Component: LoginScreen, loader: loginLoader },
   {
-    path: "/",
-    Component: LoginScreen,
-  },
-  {
-    path: "/register",
-    Component: RegisterScreen,
-  },
-  {
-    path: "/customize-profile",
-    Component: CustomizeProfileScreen,
+    path: "/onboarding",
+    Component: OnboardingScreen,
+    loader: onboardingLoader,
   },
   {
     path: "/map",
     Component: MapScreen,
-    loader: requireAuth,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/swipe",
+    Component: SwipeScreen,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/chat",
+    Component: ChatListScreen,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/chat/:threadId",
+    Component: ChatThreadScreen,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/scene",
+    Component: SceneFeedScreen,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/scene/:postId",
+    Component: ScenePostScreen,
+    loader: ({ request }) => requireSession(request),
+  },
+  {
+    path: "/notifications",
+    Component: NotificationsScreen,
+    loader: ({ request }) => requireSession(request),
   },
   {
     path: "/profile/:userId",
     Component: ProfileScreen,
-    loader: requireAuth,
+    loader: ({ request }) => requireSession(request),
   },
   {
     path: "/settings",
     Component: SettingsScreen,
-    loader: requireAuth,
-  },
-  {
-    path: "/settings/language",
-    Component: LanguageSettingsScreen,
-    loader: requireAuth,
+    loader: ({ request }) => requireSession(request),
   },
 ]);

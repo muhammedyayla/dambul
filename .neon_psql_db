@@ -1,0 +1,76 @@
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  google_id TEXT UNIQUE NOT NULL,
+  name TEXT,
+  email TEXT UNIQUE NOT NULL,
+  avatar_url TEXT,
+  city TEXT,
+  height_cm INT,
+  bio TEXT,
+  tags TEXT[],
+  extra_photos TEXT[],
+  gender TEXT,
+  preferred_gender TEXT DEFAULT 'everyone',
+  preferred_age_min INT DEFAULT 18,
+  preferred_age_max INT DEFAULT 100,
+  preferred_distance TEXT DEFAULT 'max',
+  preferred_height_min INT DEFAULT 130,
+  preferred_height_max INT DEFAULT 230,
+  show_on_map BOOLEAN DEFAULT true,
+  vibration BOOLEAN DEFAULT true,
+  notifications BOOLEAN DEFAULT true,
+  language TEXT DEFAULT 'tr',
+  personality JSONB DEFAULT '{}',
+  lat FLOAT,
+  lng FLOAT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE scene_posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  location_tag TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE chat_threads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_a UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_b UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_a, user_b)
+);
+
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id UUID REFERENCES chat_threads(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE likes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_user UUID REFERENCES users(id) ON DELETE CASCADE,
+  to_user UUID REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT DEFAULT 'like',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(from_user, to_user)
+);
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE profile_views (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viewer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  viewed_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);

@@ -1,462 +1,287 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import {
-  ArrowLeft,
-  ChevronRight,
-  LogOut,
-  Globe,
-  Bell,
-  MapPin,
-  RotateCcw,
-  HelpCircle,
-  Mail,
-  FileText,
-  Shield,
-  Users,
-  Smartphone,
-} from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { ChevronToMap } from "../components/ChevronToMap";
+import { apiGet, apiPatch, apiPost, API_BASE } from "../api";
+import type { SessionUser } from "../types";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import { Switch } from "../components/ui/switch";
 import { Slider } from "../components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
-import { currentUser } from "../data/currentUser";
-import { setAuthed } from "../auth";
-import { cn } from "../components/ui/utils";
-
-const SEE_OPTIONS = ["Kadınlar", "Erkekler", "Herkes"] as const;
-const DISTANCE_STOPS = [
-  { label: "Min", km: 1 },
-  { label: "25 km", km: 25 },
-  { label: "50 km", km: 50 },
-  { label: "100 km", km: 100 },
-  { label: "Max", km: 200 },
-] as const;
-
-const PERSONALITY = [
-  {
-    title: "Mizahın?",
-    left: "Alaycı",
-    mid: "Karışık",
-    right: "Pozitif",
-  },
-  {
-    title: "Enerji seviyen",
-    left: "İçe dönük",
-    mid: "Dengeli",
-    right: "Dışa dönük",
-  },
-  {
-    title: "Yaşam tarzın",
-    left: "Güvenli ve rahat",
-    mid: "Orta",
-    right: "Maceracı ve riskli",
-  },
-  {
-    title: "İlk adımı kim atar?",
-    left: "Ben atarım",
-    mid: "Herhangi biri",
-    right: "Beklerim",
-  },
-  {
-    title: "Aşk dilin ne?",
-    left: "Kelime aşığı",
-    mid: "Hediye bağımlısı",
-    right: "Dokunma arayıcı",
-  },
-  {
-    title: "İdeal hafta sonun?",
-    left: "Evde chill",
-    mid: "Arkadaşlarla dışarı",
-    right: "Macera modu",
-  },
-] as const;
-
-function PreferenceCard({
-  title,
-  children,
-  className,
-}: {
-  title: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "min-w-[min(88vw,300px)] shrink-0 snap-center rounded-2xl border border-border bg-card p-4",
-        className,
-      )}
-    >
-      <p className="mb-3 text-sm font-medium text-muted-foreground">{title}</p>
-      {children}
-    </div>
-  );
-}
-
-function PersonalityBar({
-  title,
-  left,
-  mid,
-  right,
-  value,
-  onChange,
-}: {
-  title: string;
-  left: string;
-  mid: string;
-  right: string;
-  value: number[];
-  onChange: (v: number[]) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <Slider
-        value={value}
-        onValueChange={onChange}
-        min={0}
-        max={100}
-        step={1}
-        className="w-full"
-      />
-      <div className="flex justify-between gap-1 text-[11px] leading-tight text-muted-foreground">
-        <span className="max-w-[32%] text-left">{left}</span>
-        <span className="max-w-[34%] text-center">{mid}</span>
-        <span className="max-w-[32%] text-right">{right}</span>
-      </div>
-    </div>
-  );
-}
-
-function SettingsRow({
-  icon: Icon,
-  label,
-  right,
-  onClick,
-  destructive,
-}: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  right?: ReactNode;
-  onClick?: () => void;
-  destructive?: boolean;
-}) {
-  const content = (
-    <>
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <Icon
-          className={cn(
-            "size-5 shrink-0",
-            destructive ? "text-destructive" : "text-muted-foreground",
-          )}
-        />
-        <span
-          className={cn(
-            "truncate text-base",
-            destructive && "font-medium text-destructive",
-          )}
-        >
-          {label}
-        </span>
-      </div>
-      {right != null ? <div className="shrink-0">{right}</div> : null}
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className="flex w-full items-center justify-between gap-3 py-3.5 text-left transition-colors hover:bg-muted/40"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-between gap-3 py-3.5">{content}</div>
-  );
-}
 
 export function SettingsScreen() {
   const navigate = useNavigate();
-  const lang = localStorage.getItem("dambul_lang") ?? "tr";
-  const langLabel =
-    lang === "en" ? "English" : lang === "de" ? "Deutsch" : "Türkçe";
+  const [u, setU] = useState<SessionUser | null>(null);
+  const [name, setName] = useState("");
+  const [city, setCity] = useState("");
+  const [height, setHeight] = useState("");
 
-  const [seeIndex, setSeeIndex] = useState(2);
-  const [ageRange, setAgeRange] = useState([22, 45]);
-  const [distanceIndex, setDistanceIndex] = useState(2);
-  const [heightCm, setHeightCm] = useState([175]);
+  useEffect(() => {
+    void (async () => {
+      const me = await apiGet<SessionUser>("/api/auth/me");
+      setU(me);
+      setName(me.name);
+      setCity(me.city || "");
+      setHeight(me.height != null ? String(me.height) : "");
+    })();
+  }, []);
 
-  const [personality, setPersonality] = useState(() =>
-    PERSONALITY.map(() => [50] as number[]),
-  );
+  const patch = async (body: Record<string, unknown>) => {
+    const next = await apiPatch<SessionUser>("/api/users/me", body);
+    setU(next);
+  };
 
-  const [haptics, setHaptics] = useState(true);
-  const [notifications, setNotifications] = useState(true);
-  const [showOnMap, setShowOnMap] = useState(true);
+  const uploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    const res = await fetch(`${API_BASE}/api/upload`, { method: "POST", body: fd, credentials: "include" });
+    if (!res.ok) return;
+    const { url } = (await res.json()) as { url: string };
+    await patch({ avatar_url: url });
+  };
 
-  const updatePersonality = (i: number, v: number[]) => {
-    setPersonality((prev) => {
-      const next = [...prev];
-      next[i] = v;
-      return next;
+  const saveBasics = async () => {
+    const h = parseInt(height, 10);
+    await patch({
+      name: name.trim(),
+      city: city.trim() || null,
+      height: Number.isNaN(h) ? null : h,
     });
   };
 
-  const logout = () => {
-    setAuthed(false);
-    navigate("/");
+  const logout = async () => {
+    await apiPost("/api/auth/logout", {});
+    navigate("/login");
   };
 
+  if (!u) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-500">
+        Yükleniyor…
+      </div>
+    );
+  }
+
+  const prefGenderLabel =
+    u.pref_gender === "female" ? "Kadınlar" : u.pref_gender === "male" ? "Erkekler" : "Herkes";
+
   return (
-    <div className="min-h-screen bg-background pb-10 text-foreground">
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-card/95 px-4 py-3 backdrop-blur-sm">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="rounded-full"
-          onClick={() => navigate("/map")}
-        >
-          <ArrowLeft className="size-5" />
-        </Button>
-        <h1 className="text-lg font-semibold">Ayarlar</h1>
-      </header>
-
-      {/* 1. Profil fotoğrafı */}
-      <section className="flex flex-col items-center px-4 pt-8">
-        <div className="size-36 overflow-hidden rounded-full border-4 border-border ring-2 ring-accent/40">
-          <img
-            src={currentUser.photo}
-            alt=""
-            className="size-full object-cover"
-          />
-        </div>
-      </section>
-
-      {/* 2. Profil bilgileri */}
-      <section className="mt-8 px-4">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Profil bilgileri
-        </h2>
-        <div className="rounded-2xl border border-border bg-card p-4 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">İsim</span>
-            <span className="font-medium">{currentUser.name}</span>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <ChevronToMap />
+      <ScrollArea className="h-screen pt-14">
+        <div className="space-y-8 px-4 pb-24">
+          <div>
+            <h1 className="text-2xl font-bold">Ayarlar</h1>
+            <p className="text-sm text-zinc-500">Profil ve tercihler</p>
           </div>
-          <Separator />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Yaş</span>
-            <span className="font-medium">{currentUser.age}</span>
+
+          <div className="flex flex-col items-center gap-3">
+            <button
+              type="button"
+              className="relative size-28 overflow-hidden rounded-full border-2 border-zinc-700"
+              onClick={() => document.getElementById("avatar-input")?.click()}
+            >
+              {u.avatar_url ? (
+                <img src={u.avatar_url} alt="" className="size-full object-cover" />
+              ) : (
+                <span className="flex size-full items-center justify-center text-3xl">{u.name.slice(0, 1)}</span>
+              )}
+            </button>
+            <input id="avatar-input" type="file" accept="image/*" className="hidden" onChange={(e) => void uploadPhoto(e)} />
+            <p className="text-xs text-zinc-500">Fotoğrafa dokun — yeni yükle</p>
           </div>
-          <Separator />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Cinsiyet</span>
-            <span className="font-medium">{currentUser.gender}</span>
+
+          <div className="space-y-3">
+            <div>
+              <Label>İsim</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} className="bg-zinc-900" />
+            </div>
+            <div>
+              <Label>Şehir</Label>
+              <Input value={city} onChange={(e) => setCity(e.target.value)} className="bg-zinc-900" />
+            </div>
+            <div>
+              <Label>Boy (cm)</Label>
+              <Input value={height} onChange={(e) => setHeight(e.target.value)} className="bg-zinc-900" />
+            </div>
+            <Button onClick={() => void saveBasics()}>Kaydet</Button>
           </div>
-          <Separator />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Bio</span>
-            <span className="max-w-[60%] text-right font-medium line-clamp-2">
-              {currentUser.bio}
-            </span>
-          </div>
-        </div>
-      </section>
 
-      {/* 3. Tercihler — yatay kaydırma */}
-      <section className="mt-10 px-0">
-        <h2 className="mb-3 px-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Tercihler
-        </h2>
-        <div className="flex gap-3 overflow-x-auto px-4 pb-2 pt-1 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <PreferenceCard title="Görmek istiyorum">
-            <div className="flex flex-col gap-2">
-              {SEE_OPTIONS.map((opt, i) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setSeeIndex(i)}
-                  className={cn(
-                    "rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors",
-                    seeIndex === i
-                      ? "border-accent bg-accent text-accent-foreground"
-                      : "border-border bg-muted/30 text-foreground hover:bg-muted/50",
-                  )}
-                >
-                  {opt}
-                </button>
-              ))}
+          <Separator className="bg-zinc-800" />
+
+          <div className="space-y-4">
+            <h2 className="font-semibold">Tercihler</h2>
+            <div>
+              <Label>Görmek istiyorum</Label>
+              <Select
+                value={prefGenderLabel}
+                onValueChange={(v) => {
+                  const map =
+                    v === "Kadınlar" ? "female" : v === "Erkekler" ? "male" : "everyone";
+                  void patch({ pref_gender: map });
+                }}
+              >
+                <SelectTrigger className="bg-zinc-900">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Kadınlar">Kadınlar</SelectItem>
+                  <SelectItem value="Erkekler">Erkekler</SelectItem>
+                  <SelectItem value="Herkes">Herkes</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          </PreferenceCard>
-
-          <PreferenceCard title="Yaş aralığı">
-            <p className="mb-2 text-xs text-muted-foreground">
-              {ageRange[0]} – {ageRange[1]} yaş
-            </p>
-            <Slider
-              value={ageRange}
-              onValueChange={(v) => setAgeRange(v as number[])}
-              min={18}
-              max={100}
-              step={1}
-              className="w-full"
-            />
-            <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-              <span>18</span>
-              <span>100</span>
-            </div>
-          </PreferenceCard>
-
-          <PreferenceCard title="Mesafe">
-            <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {DISTANCE_STOPS.map((d, i) => (
-                <button
-                  key={d.label}
-                  type="button"
-                  onClick={() => setDistanceIndex(i)}
-                  className={cn(
-                    "shrink-0 rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
-                    distanceIndex === i
-                      ? "border-accent bg-accent text-accent-foreground"
-                      : "border-border bg-muted/30 hover:bg-muted/50",
-                  )}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-          </PreferenceCard>
-
-          <PreferenceCard title="Boy">
-            <p className="mb-2 text-xs text-muted-foreground">
-              {heightCm[0]} cm
-            </p>
-            <Slider
-              value={heightCm}
-              onValueChange={(v) => setHeightCm(v as number[])}
-              min={130}
-              max={230}
-              step={1}
-              className="w-full"
-            />
-            <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-              <span>130 cm</span>
-              <span>230 cm</span>
-            </div>
-          </PreferenceCard>
-        </div>
-      </section>
-
-      {/* 4. Personality */}
-      <section className="mt-10 px-4">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Personality
-        </h2>
-        <div className="space-y-6 rounded-2xl border border-border bg-card p-4">
-          {PERSONALITY.map((p, i) => (
-            <PersonalityBar
-              key={p.title}
-              title={p.title}
-              left={p.left}
-              mid={p.mid}
-              right={p.right}
-              value={personality[i] ?? [50]}
-              onChange={(v) => updatePersonality(i, v)}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* 5. Ayarlar listesi */}
-      <section className="mt-10 px-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Ayarlar
-        </h2>
-        <div className="divide-y divide-border rounded-2xl border border-border bg-card px-4">
-          <SettingsRow
-            icon={Globe}
-            label="Dilim"
-            onClick={() => navigate("/settings/language")}
-            right={
-              <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                {langLabel}
-                <ChevronRight className="size-4" />
-              </span>
-            }
-          />
-          <SettingsRow
-            icon={Smartphone}
-            label="Titreme"
-            right={
-              <Switch checked={haptics} onCheckedChange={setHaptics} />
-            }
-          />
-          <SettingsRow
-            icon={Bell}
-            label="Bildirimler"
-            right={
-              <Switch
-                checked={notifications}
-                onCheckedChange={setNotifications}
+            <div>
+              <Label>
+                Yaş aralığı: {u.pref_age_min} – {u.pref_age_max}
+              </Label>
+              <Slider
+                value={[u.pref_age_min, u.pref_age_max]}
+                onValueChange={([a, b]) => void patch({ pref_age_min: a, pref_age_max: b })}
+                min={18}
+                max={100}
+                step={1}
+                className="mt-2"
               />
-            }
-          />
-          <SettingsRow
-            icon={MapPin}
-            label="Beni haritada göster"
-            right={
-              <Switch checked={showOnMap} onCheckedChange={setShowOnMap} />
-            }
-          />
-          <SettingsRow
-            icon={RotateCcw}
-            label="Satın Alımları Geri Yükle"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={HelpCircle}
-            label="SSS"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={Mail}
-            label="İletişim"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={FileText}
-            label="Terimler"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={Shield}
-            label="Mahremiyet"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={Users}
-            label="Topluluk Kuralları"
-            onClick={() => {}}
-            right={<ChevronRight className="size-4 text-muted-foreground" />}
-          />
-          <SettingsRow
-            icon={LogOut}
-            label="Çıkış Yap"
-            destructive
-            onClick={logout}
-          />
+            </div>
+            <div>
+              <Label>Mesafe (km): {u.pref_distance_km}</Label>
+              <Select
+                value={String(u.pref_distance_km)}
+                onValueChange={(v) => void patch({ pref_distance_km: parseInt(v, 10) })}
+              >
+                <SelectTrigger className="bg-zinc-900">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">Yakın</SelectItem>
+                  <SelectItem value="25">25 km</SelectItem>
+                  <SelectItem value="50">50 km</SelectItem>
+                  <SelectItem value="100">100 km</SelectItem>
+                  <SelectItem value="300">Maksimum</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>
+                Boy tercihi: {u.pref_height_min} – {u.pref_height_max} cm
+              </Label>
+              <Slider
+                value={[u.pref_height_min, u.pref_height_max]}
+                onValueChange={([a, b]) => void patch({ pref_height_min: a, pref_height_max: b })}
+                min={130}
+                max={230}
+                step={1}
+                className="mt-2"
+              />
+            </div>
+          </div>
+
+          <Separator className="bg-zinc-800" />
+
+          <div className="space-y-4">
+            <h2 className="font-semibold">Kişilik (düzenle)</h2>
+            <PersonEdit label="Mizah" v={u.personality_humor} onChange={(n) => void patch({ personality_humor: n })} />
+            <PersonEdit label="Enerji" v={u.personality_energy} onChange={(n) => void patch({ personality_energy: n })} />
+            <PersonEdit
+              label="Yaşam"
+              v={u.personality_lifestyle}
+              onChange={(n) => void patch({ personality_lifestyle: n })}
+            />
+            <PersonEdit
+              label="İlk adım"
+              v={u.personality_first_step}
+              onChange={(n) => void patch({ personality_first_step: n })}
+            />
+            <PersonEdit
+              label="Aşk dili"
+              v={u.personality_love_language}
+              onChange={(n) => void patch({ personality_love_language: n })}
+            />
+            <PersonEdit
+              label="Hafta sonu"
+              v={u.personality_weekend}
+              onChange={(n) => void patch({ personality_weekend: n })}
+            />
+          </div>
+
+          <Separator className="bg-zinc-800" />
+
+          <div className="space-y-1">
+            <Row title="Dilim" mock />
+            <div className="flex items-center justify-between py-3">
+              <span>Titreme</span>
+              <Switch
+                checked={u.vibration_enabled}
+                onCheckedChange={(c) => void patch({ vibration_enabled: c })}
+              />
+            </div>
+            <div className="flex items-center justify-between py-3">
+              <span>Bildirimler</span>
+              <Switch
+                checked={u.notifications_enabled}
+                onCheckedChange={(c) => void patch({ notifications_enabled: c })}
+              />
+            </div>
+            <div className="flex items-center justify-between py-3">
+              <span>Beni haritada göster</span>
+              <Switch checked={u.show_on_map} onCheckedChange={(c) => void patch({ show_on_map: c })} />
+            </div>
+            <Row title="Satın Alımları Geri Yükle" mock />
+            <Row title="SSS" mock />
+            <Row title="İletişim" mock />
+            <Row title="Terimler" mock />
+            <Row title="Mahremiyet" mock />
+            <Row title="Topluluk Kuralları" mock />
+          </div>
+
+          <Button variant="destructive" className="w-full" onClick={() => void logout()}>
+            Çıkış Yap
+          </Button>
         </div>
-      </section>
+      </ScrollArea>
     </div>
+  );
+}
+
+function PersonEdit({
+  label,
+  v,
+  onChange,
+}: {
+  label: string;
+  v: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Slider value={[v]} onValueChange={([n]) => onChange(n)} max={100} step={1} className="mt-2" />
+    </div>
+  );
+}
+
+function Row({ title, mock }: { title: string; mock?: boolean }) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center justify-between py-3 text-left"
+      onClick={() => mock && alert("Yakında")}
+    >
+      <span>{title}</span>
+      <ChevronRight className="size-4 text-zinc-500" />
+    </button>
   );
 }

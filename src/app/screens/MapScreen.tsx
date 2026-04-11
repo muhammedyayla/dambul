@@ -1,269 +1,179 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
-import { SlidersHorizontal, X, Plus, Minus } from "lucide-react";
-import { Button } from "../components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../components/ui/dropdown-menu";
-import { mockUsers } from "../data/mockData";
-import { currentUser } from "../data/currentUser";
-import { UserDetailPopup } from "../components/UserDetailPopup";
-import { UserBottomSheet } from "../components/UserBottomSheet";
-import { motion, AnimatePresence } from "motion/react";
+import { useEffect, useRef, useState } from "react";
+import { useLoaderData, useNavigate } from "react-router";
+import mapboxgl from "mapbox-gl";
+import { MapPin, Clock, CloudSun, Rocket, Calendar } from "lucide-react";
+import { toast } from "sonner";
+import { FloatingTabBar } from "../components/FloatingTabBar";
+import { apiGet } from "../api";
+import type { SessionUser } from "../types";
+
+type MapUser = { id: string; name: string; avatar_url: string | null; lat: number; lng: number };
+
+const token = import.meta.env.VITE_MAP_BOX_TOKEN;
 
 export function MapScreen() {
+  const loaderData = useLoaderData() as SessionUser;
   const navigate = useNavigate();
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [bottomSheetUserId, setBottomSheetUserId] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const [clock, setClock] = useState(() => new Date());
 
-  const selectedUser = mockUsers.find((u) => u.id === selectedUserId);
-  const bottomSheetUser = mockUsers.find((u) => u.id === bottomSheetUserId);
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
-  // Convert lat/lng to x/y positions (simplified for demo)
-  const getPosition = (lat: number, lng: number) => {
-    // Center around San Francisco coordinates
-    const baseLat = 37.7749;
-    const baseLng = -122.4194;
-    
-    // Scale factor for positioning
-    const scale = 5000;
-    
-    const x = 50 + (lng - baseLng) * scale;
-    const y = 50 + (baseLat - lat) * scale;
-    
-    return { x, y };
-  };
+  useEffect(() => {
+    if (!token?.trim() || !wrapRef.current) return;
+
+    mapboxgl.accessToken = token;
+    const map = new mapboxgl.Map({
+      container: wrapRef.current,
+      style: "mapbox://styles/mapbox/dark-v11",
+      center:
+        loaderData.lng != null && loaderData.lat != null ? [loaderData.lng, loaderData.lat] : [28.9784, 41.0082],
+      zoom: 2,
+      projection: "globe",
+    });
+    map.dragRotate.enable();
+    map.touchZoomRotate.enableRotation();
+    mapRef.current = map;
+
+    map.on("style.load", () => {
+      map.setFog({});
+    });
+
+    map.on("load", () => {
+      void (async () => {
+        try {
+          const list = await apiGet<MapUser[]>("/api/users/map");
+
+          const geojson: GeoJSON.FeatureCollection = {
+            type: "FeatureCollection",
+            features: list.map((u) => ({
+              type: "Feature",
+              properties: { id: u.id },
+              geometry: { type: "Point", coordinates: [u.lng, u.lat] },
+            })),
+          };
+
+          if (!map.getSource("users-heat")) {
+            map.addSource("users-heat", { type: "geojson", data: geojson });
+            map.addLayer({
+              id: "users-heat-layer",
+              type: "heatmap",
+              source: "users-heat",
+              paint: {
+                "heatmap-weight": 1,
+                "heatmap-intensity": 1,
+                "heatmap-radius": 40,
+                "heatmap-opacity": 0.65,
+              },
+            });
+          } else {
+            (map.getSource("users-heat") as mapboxgl.GeoJSONSource).setData(geojson);
+          }
+
+          markersRef.current.forEach((m) => m.remove());
+          markersRef.current = [];
+          list.forEach((u) => {
+            const el = document.createElement("button");
+            el.type = "button";
+            el.className =
+              "size-10 overflow-hidden rounded-full border-2 border-white/30 shadow-lg ring-2 ring-violet-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
+            el.style.background = "#27272a";
+            if (u.avatar_url) {
+              const img = document.createElement("img");
+              img.src = u.avatar_url;
+              img.alt = "";
+              img.className = "size-full object-cover";
+              el.appendChild(img);
+            } else {
+              el.textContent = u.name.slice(0, 1).toUpperCase();
+              el.className += " text-sm font-bold text-white";
+            }
+            el.addEventListener("click", () => navigate(`/profile/${u.id}`));
+            const marker = new mapboxgl.Marker({ element: el }).setLngLat([u.lng, u.lat]).addTo(map);
+            markersRef.current.push(marker);
+          });
+        } catch {
+          toast.error("Harita verileri yüklenemedi");
+        }
+      })();
+    });
+
+    return () => {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [loaderData.lat, loaderData.lng, loaderData.id, navigate]);
+
+  if (!token?.trim()) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 px-6 text-center text-zinc-100">
+        <p className="text-lg font-semibold">Harita anahtarı eksik</p>
+        <p className="max-w-md text-sm text-zinc-400">
+          `.env` dosyasında `map_box_token` tanımlı olmalı ve Vite yeniden başlatılmalıdır.
+        </p>
+      </div>
+    );
+  }
+
+  const cityLabel = loaderData.city || "Konum";
 
   return (
-    <div className="h-screen w-full relative bg-zinc-950 overflow-hidden">
-      {/* Sağ üst: avatar + Settings menüsü */}
-      <div className="absolute top-6 right-6 z-[1000] flex flex-col items-center gap-1">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex flex-col items-center gap-1 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <div className="size-12 overflow-hidden rounded-full border-2 border-border bg-card ring-2 ring-accent/30">
-                <img
-                  src={currentUser.photo}
-                  alt=""
-                  className="size-full object-cover"
-                />
-              </div>
-              <span className="text-[11px] font-medium text-zinc-300">
-                Settings
-              </span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[10rem]">
-            <DropdownMenuItem onSelect={() => navigate("/settings")}>
-              Settings
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+    <div className="relative h-screen w-full overflow-hidden bg-zinc-950">
+      <div ref={wrapRef} className="absolute inset-0" />
+
+      <div className="pointer-events-none absolute left-4 top-4 z-[900] flex flex-col gap-3 text-zinc-100">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-zinc-950/85 px-3 py-2 text-sm shadow-lg ring-1 ring-zinc-700/80 backdrop-blur">
+          <MapPin className="size-5 shrink-0 text-violet-400" />
+          <span className="font-bold">{cityLabel}</span>
+        </div>
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-zinc-950/85 px-3 py-2 text-sm shadow-lg ring-1 ring-zinc-700/80 backdrop-blur">
+          <Clock className="size-5 shrink-0 text-amber-300" />
+          <span>
+            {clock.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+        </div>
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-zinc-950/85 px-3 py-2 text-sm shadow-lg ring-1 ring-zinc-700/80 backdrop-blur">
+          <CloudSun className="size-5 shrink-0 text-sky-300" />
+          <span>18°C</span>
+        </div>
       </div>
 
-      {/* Map Background */}
-      <div 
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `url('https://images.unsplash.com/photo-1544411047-c491e34a24e0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjaXR5JTIwbWFwJTIwZGFyayUyMGFlcmlhbHxlbnwxfHx8fDE3NzU0NzIyOTl8MA&ixlib=rb-4.1.0&q=80&w=1080')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-          transition: 'transform 0.3s ease',
-          filter: 'brightness(0.4)',
-        }}
-      />
-
-      {/* Map Grid Overlay */}
-      <div 
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: '50px 50px',
-          transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-          transition: 'transform 0.3s ease',
-        }}
-      />
-
-      {/* User Markers */}
-      <div className="absolute inset-0">
-        {mockUsers.map((user) => {
-          const pos = getPosition(user.location.lat, user.location.lng);
-          return (
-            <motion.button
-              key={user.id}
-              initial={{ opacity: 0, scale: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.1 * parseInt(user.id), type: "spring" }}
-              onClick={() => setSelectedUserId(user.id)}
-              className="absolute cursor-pointer group"
-              style={{
-                left: `${pos.x}%`,
-                top: `${pos.y}%`,
-                transform: `scale(${zoom}) translate(-50%, -50%)`,
-                transformOrigin: 'center',
-              }}
-            >
-              {/* User Avatar Pin */}
-              <div className="relative">
-                <div className="size-14 rounded-full overflow-hidden border-4 border-white shadow-2xl transition-transform group-hover:scale-110">
-                  <img
-                    src={user.photo}
-                    alt={user.name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                
-                {/* Pulse Effect */}
-                <div className="absolute inset-0 rounded-full bg-indigo-500/30 animate-ping" />
-                
-                {/* Score Badge */}
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg whitespace-nowrap">
-                  {user.dambulScore}
-                </div>
-              </div>
-
-              {/* Hover Label */}
-              <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/95 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-xl shadow-xl whitespace-nowrap pointer-events-none border border-zinc-700">
-                <p className="font-semibold">{user.name}</p>
-                <p className="text-xs text-zinc-400">{user.age} years old</p>
-              </div>
-            </motion.button>
-          );
-        })}
+      <div className="absolute right-4 top-4 z-[900] flex flex-col items-center gap-3">
+        <button
+          type="button"
+          onClick={() => navigate("/settings")}
+          className="flex size-12 items-center justify-center overflow-hidden rounded-full border-2 border-zinc-600 bg-zinc-900 shadow-lg ring-2 ring-violet-500/30"
+        >
+          {loaderData.avatar_url ? (
+            <img src={loaderData.avatar_url} alt="" className="size-full object-cover" />
+          ) : (
+            <span className="text-lg font-bold text-white">{loaderData.name.slice(0, 1)}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => toast("Boost yakında")}
+          className="flex size-12 items-center justify-center rounded-full bg-zinc-900/95 text-violet-300 shadow-lg ring-1 ring-zinc-700"
+        >
+          <Rocket className="size-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => toast("Etkinlikler yakında")}
+          className="flex size-12 items-center justify-center rounded-full bg-zinc-900/95 text-emerald-300 shadow-lg ring-1 ring-zinc-700"
+        >
+          <Calendar className="size-5" />
+        </button>
       </div>
 
-      {/* Zoom Controls — filtre butonunun üstünde */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="absolute bottom-28 right-6 z-[1000] flex flex-col gap-2"
-      >
-        <Button
-          onClick={() => setZoom(Math.min(zoom + 0.2, 2))}
-          className="size-12 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-zinc-50 p-0"
-        >
-          <Plus className="size-5 text-zinc-900" />
-        </Button>
-        <Button
-          onClick={() => setZoom(Math.max(zoom - 0.2, 0.5))}
-          className="size-12 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-zinc-50 p-0"
-        >
-          <Minus className="size-5 text-zinc-900" />
-        </Button>
-      </motion.div>
-
-      {/* Filter Button — sağ alt */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="absolute bottom-6 right-6 z-[1000]"
-      >
-        <Button
-          onClick={() => setShowFilters(!showFilters)}
-          className="size-14 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-zinc-50 p-0"
-        >
-          <SlidersHorizontal className="size-6 text-zinc-900" />
-        </Button>
-      </motion.div>
-
-      {/* Filter Panel — filtre butonunun üstünde açılır */}
-      <AnimatePresence>
-        {showFilters && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 16 }}
-            className="absolute bottom-24 right-6 z-[1000] bg-zinc-900/95 backdrop-blur-xl rounded-3xl p-6 shadow-2xl border border-zinc-800 min-w-[280px]"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-white">Filters</h3>
-              <button
-                onClick={() => setShowFilters(false)}
-                className="text-zinc-400 hover:text-white"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-zinc-400 block mb-2">Distance</label>
-                <input
-                  type="range"
-                  min="1"
-                  max="50"
-                  defaultValue="10"
-                  className="w-full accent-indigo-600"
-                />
-                <div className="flex justify-between text-xs text-zinc-500 mt-1">
-                  <span>1 km</span>
-                  <span>50 km</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm text-zinc-400 block mb-2">
-                  Min Dambul Score
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  defaultValue="50"
-                  className="w-full accent-indigo-600"
-                />
-                <div className="flex justify-between text-xs text-zinc-500 mt-1">
-                  <span>0</span>
-                  <span>100</span>
-                </div>
-              </div>
-
-              <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl">
-                Apply Filters
-              </Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* User Detail Popup */}
-      <AnimatePresence>
-        {selectedUser && (
-          <UserDetailPopup
-            user={selectedUser}
-            onClose={() => setSelectedUserId(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Bottom Sheet Preview */}
-      <AnimatePresence>
-        {bottomSheetUser && (
-          <UserBottomSheet
-            user={bottomSheetUser}
-            onClose={() => setBottomSheetUserId(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Map Legend */}
-      <div className="absolute bottom-6 left-6 z-[1000] bg-zinc-900/95 backdrop-blur-xl rounded-2xl p-4 shadow-xl border border-zinc-800">
-        <p className="text-white text-sm font-semibold mb-2">📍 Nearby Users</p>
-        <p className="text-zinc-400 text-xs">{mockUsers.length} people in your area</p>
-      </div>
+      <FloatingTabBar />
     </div>
   );
 }
