@@ -19,7 +19,7 @@ type PostDetail = {
   author_tags: unknown;
 };
 
-export function ScenePostScreen() {
+export function VibePostScreen() {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
   const [post, setPost] = useState<PostDetail | null>(null);
@@ -28,7 +28,7 @@ export function ScenePostScreen() {
     if (!postId) return;
     void (async () => {
       try {
-        const p = await apiGet<PostDetail>(`/api/scene/posts/${postId}`);
+        const p = await apiGet<PostDetail>(`/api/vibe/posts/${postId}`);
         setPost(p);
       } catch {
         toast.error("Gönderi bulunamadı");

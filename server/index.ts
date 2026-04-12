@@ -10,18 +10,34 @@ import multer from "multer";
 import { Rest as AblyRest } from "ably";
 import { put } from "@vercel/blob";
 import dotenv from "dotenv";
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { pool, initSchema } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 
 dotenv.config();
 
 const FRONTEND_ORIGIN = "http://localhost:5173";
+cloudinary.config({
+  cloud_name: process.env.cloudinary_cloud_name,
+  api_key: process.env.cloudinary_api_key,
+  api_secret: process.env.cloudinary_api_secret,
+});
+
 const API_PORT = Number(process.env.PORT) || 3001;
 const CALLBACK_URL =
   process.env.GOOGLE_CALLBACK_URL ||
   "http://localhost:3001/api/auth/google/callback";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "dambull",
+    allowed_formats: ["jpg", "png", "jpeg", "webp", "avif"],
+  } as any,
+});
+
+const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 export type DbUser = {
   id: string;
@@ -239,26 +255,12 @@ app.post("/api/auth/logout", (req, res) => {
   });
 });
 
-app.post("/api/upload", requireLogin, upload.single("file"), async (req, res) => {
+app.post("/api/upload", requireLogin, upload.single("photo"), async (req, res) => {
   try {
     const file = req.file;
     if (!file) return res.status(400).json({ error: "Dosya yok" });
-    const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (token) {
-      const blob = await put(file.originalname || `upload-${Date.now()}`, file.buffer, {
-        access: "public",
-        token,
-      });
-      return res.json({ url: blob.url });
-    }
-    const dir = path.join(process.cwd(), "uploads");
-    await fs.mkdir(dir, { recursive: true });
-    const ext = path.extname(file.originalname || "");
-    const safeExt = ext && /^\.(jpe?g|png|gif|webp|avif)$/i.test(ext) ? ext.toLowerCase() : ".jpg";
-    const name = `${randomUUID()}${safeExt}`;
-    await fs.writeFile(path.join(dir, name), file.buffer);
-    const base = process.env.PUBLIC_API_URL || `http://localhost:${API_PORT}`;
-    res.json({ url: `${base}/uploads/${name}` });
+    // Cloudinary storage automatically uploads and fills req.file.path
+    res.json({ url: (file as any).path || (file as any).secure_url });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Yükleme başarısız" });
@@ -346,7 +348,9 @@ app.get("/api/users/swipe", requireLogin, async (req, res) => {
     genderFilter = " AND gender = 'other' ";
   }
   const r = await pool.query(
-    `SELECT u.* FROM users u
+    `SELECT u.*, 
+            (SELECT url FROM user_photos WHERE user_id = u.id ORDER BY order_index ASC LIMIT 1) as first_photo
+     FROM users u
      WHERE u.id != $1
      AND u.id NOT IN (SELECT to_user FROM likes WHERE from_user = $1)
      ${genderFilter}
@@ -516,31 +520,31 @@ app.get("/api/ably/token", requireLogin, async (req, res) => {
   }
 });
 
-app.get("/api/scene/posts", requireLogin, async (_req, res) => {
+app.get("/api/vibe/posts", requireLogin, async (_req, res) => {
   const r = await pool.query(
     `SELECT p.*, u.name AS author_name, u.avatar_url AS author_avatar, u.city AS author_city
-     FROM scene_posts p
+     FROM vibe_posts p
      JOIN users u ON u.id = p.user_id
      ORDER BY p.created_at DESC`
   );
   res.json(r.rows);
 });
 
-app.post("/api/scene/posts", requireLogin, async (req, res) => {
+app.post("/api/vibe/posts", requireLogin, async (req, res) => {
   if (!req.user) return res.status(401).end();
   const { title, location_tag } = req.body as { title?: string; location_tag?: string };
   if (!title?.trim()) return res.status(400).json({ error: "Başlık gerekli" });
   const ins = await pool.query(
-    `INSERT INTO scene_posts (user_id, title, location_tag) VALUES ($1, $2, $3) RETURNING *`,
+    `INSERT INTO vibe_posts (user_id, title, location_tag) VALUES ($1, $2, $3) RETURNING *`,
     [req.user.id, title.trim(), location_tag ?? null]
   );
   res.json(ins.rows[0]);
 });
 
-app.get("/api/scene/posts/:postId", requireLogin, async (req, res) => {
+app.get("/api/vibe/posts/:postId", requireLogin, async (req, res) => {
   const r = await pool.query(
     `SELECT p.*, u.name AS author_name, u.avatar_url AS author_avatar, u.city AS author_city, u.tags AS author_tags
-     FROM scene_posts p
+     FROM vibe_posts p
      JOIN users u ON u.id = p.user_id
      WHERE p.id = $1`,
     [req.params.postId]
@@ -597,6 +601,95 @@ app.post("/api/profile-views", requireLogin, async (req, res) => {
     [viewed_id, req.user.id, "profilini görüntüledi"]
   );
   res.json({ ok: true });
+});
+
+// --- USER PHOTOS ---
+
+app.post("/api/users/me/photos", requireLogin, async (req, res) => {
+  try {
+    const { url, order_index } = req.body as { url: string; order_index: number };
+    const uid = req.user!.id;
+
+    const countRes = await pool.query("SELECT COUNT(*) FROM user_photos WHERE user_id = $1", [uid]);
+    if (parseInt(countRes.rows[0].count) >= 10) {
+      return res.status(400).json({ error: "Maksimum 10 fotoğraf yükleyebilirsiniz" });
+    }
+
+    const ins = await pool.query(
+      "INSERT INTO user_photos (user_id, url, order_index) VALUES ($1, $2, $3) RETURNING *",
+      [uid, url, order_index]
+    );
+    res.json(ins.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Fotoğraf eklenemedi" });
+  }
+});
+
+app.get("/api/users/:userId/photos", requireLogin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const r = await pool.query(
+      "SELECT * FROM user_photos WHERE user_id = $1 ORDER BY order_index ASC",
+      [userId]
+    );
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Fotoğraflar alınamadı" });
+  }
+});
+
+app.delete("/api/users/me/photos/:photoId", requireLogin, async (req, res) => {
+  try {
+    const { photoId } = req.params;
+    const uid = req.user!.id;
+
+    const exist = await pool.query("SELECT * FROM user_photos WHERE id = $1 AND user_id = $2", [
+      photoId,
+      uid,
+    ]);
+    if (!exist.rows.length) return res.status(404).json({ error: "Fotoğraf bulunamadı" });
+
+    const photo = exist.rows[0];
+    await pool.query("DELETE FROM user_photos WHERE id = $1", [photoId]);
+
+    // Cloudinary delete
+    try {
+      const url = photo.url;
+      // Extract public_id: https://res.cloudinary.com/.../v123/dambull/abc.jpg -> dambull/abc
+      const parts = url.split("/");
+      const last = parts[parts.length - 1]; // abc.jpg
+      const publicId = last.split(".")[0];
+      const folder = "dambull"; // folder name used in CloudinaryStorage
+      await cloudinary.uploader.destroy(`${folder}/${publicId}`);
+    } catch (err) {
+      console.warn("Cloudinary delete failed", err);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Fotoğraf silinemedi" });
+  }
+});
+
+app.patch("/api/users/me/photos/reorder", requireLogin, async (req, res) => {
+  try {
+    const { photos } = req.body as { photos: { id: string; order_index: number }[] };
+    const uid = req.user!.id;
+
+    for (const p of photos) {
+      await pool.query(
+        "UPDATE user_photos SET order_index = $1 WHERE id = $2 AND user_id = $3",
+        [p.order_index, p.id, uid]
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Sıralama güncellenemedi" });
+  }
 });
 
 async function start() {

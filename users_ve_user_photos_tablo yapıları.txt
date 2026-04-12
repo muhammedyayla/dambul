@@ -1,0 +1,39 @@
+tablo yapılarıda neonda aldım böyle her iki tabloda Table "public.users"ColumnTypeCollationNullableDefaultStorageCompressionStats targetDescriptioniduuidnot nullgen_random_uuid()plaingoogle_idtextnot nullextendedemailtextextendednametextnot null''::textextendedavatar_urltextextendedcitytextextendedlatdouble precisionplainlngdouble precisionplainheightintegerplaingendertextextendedbiotextextendedtagsjsonb'[]'::jsonbextendedpersonality_humorinteger50plainpersonality_energyinteger50plainpersonality_lifestyleinteger50plainpersonality_first_stepinteger50plainpersonality_love_languageinteger50plainpersonality_weekendinteger50plainshow_on_mapbooleantrueplainpref_gendertext'everyone'::textextendedpref_age_mininteger18plainpref_age_maxinteger100plainpref_distance_kminteger50plainpref_height_mininteger130plainpref_height_maxinteger230plainvibration_enabledbooleantrueplainnotifications_enabledbooleantrueplainbirth_datedateplainextra_photosjsonb'[]'::jsonbextendedabstract_qajsonb'[]'::jsonbextendedcreated_attimestamp with time zonenow()plainupdated_attimestamp with time zonenow()plain
+
+Indexes:
+
+"users_pkey" PRIMARY KEY, btree (id)
+
+"users_google_id_key" UNIQUE CONSTRAINT, btree (google_id)
+
+Referenced by:
+
+TABLE "chat_threads" CONSTRAINT "chat_threads_user_a_fkey" FOREIGN KEY (user_a) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "chat_threads" CONSTRAINT "chat_threads_user_b_fkey" FOREIGN KEY (user_b) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "likes" CONSTRAINT "likes_from_user_fkey" FOREIGN KEY (from_user) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "likes" CONSTRAINT "likes_to_user_fkey" FOREIGN KEY (to_user) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "messages" CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "notifications" CONSTRAINT "notifications_actor_id_fkey" FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+
+TABLE "notifications" CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "scene_posts" CONSTRAINT "scene_posts_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+TABLE "user_photos" CONSTRAINT "user_photos_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+Access method: heap Table "public.user_photos"ColumnTypeCollationNullableDefaultStorageCompressionStats targetDescriptioniduuidnot nullgen_random_uuid()plainuser_iduuidplainurltextnot nullextendedorder_indexinteger0plaincreated_attimestamp with time zonenow()plain
+
+Indexes:
+
+"user_photos_pkey" PRIMARY KEY, btree (id)
+
+Foreign-key constraints:
+
+"user_photos_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+Access method: heap 

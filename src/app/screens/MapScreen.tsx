@@ -35,6 +35,7 @@ export function MapScreen() {
         loaderData.lng != null && loaderData.lat != null ? [loaderData.lng, loaderData.lat] : [28.9784, 41.0082],
       zoom: 2,
       projection: "globe",
+      optimizeForTerrain: false,
     });
     map.dragRotate.enable();
     map.touchZoomRotate.enableRotation();
@@ -42,6 +43,26 @@ export function MapScreen() {
 
     map.on("style.load", () => {
       map.setFog({});
+
+      if (!map.getSource("mapbox-dem")) {
+        map.addSource("mapbox-dem", {
+          type: "raster-dem",
+          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+          tileSize: 512,
+          maxzoom: 14,
+        });
+      }
+
+      if (!map.getLayer("hillshading")) {
+        map.addLayer(
+          {
+            id: "hillshading",
+            source: "mapbox-dem",
+            type: "hillshade",
+          },
+          "waterway-label"
+        );
+      }
     });
 
     map.on("load", () => {

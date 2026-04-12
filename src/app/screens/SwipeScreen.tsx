@@ -17,6 +17,7 @@ type SwipeUser = {
   id: string;
   name: string;
   avatar_url: string | null;
+  first_photo: string | null;
   city: string | null;
   age: number | null;
 };
@@ -147,7 +148,10 @@ function SwipeCard({
   const rotate = useTransform(x, [-200, 200], [-18, 18]);
   const opacity = useTransform(x, [-200, -80, 0, 80, 200], [0, 1, 1, 1, 0]);
 
-  const photo = user.avatar_url || "https://placehold.co/400x600/27272a/a1a1aa/png?text=?";
+  const photo =
+    user.first_photo ||
+    user.avatar_url ||
+    "https://placehold.co/400x600/27272a/a1a1aa/png?text=?";
 
   return (
     <motion.div

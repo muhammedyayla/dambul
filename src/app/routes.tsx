@@ -5,8 +5,8 @@ import { OnboardingScreen } from "./screens/OnboardingScreen";
 import { SwipeScreen } from "./screens/SwipeScreen";
 import { ChatListScreen } from "./screens/ChatListScreen";
 import { ChatThreadScreen } from "./screens/ChatThreadScreen";
-import { SceneFeedScreen } from "./screens/SceneFeedScreen";
-import { ScenePostScreen } from "./screens/ScenePostScreen";
+import { VibeFeedScreen } from "./screens/VibeFeedScreen";
+import { VibePostScreen } from "./screens/VibePostScreen";
 import { NotificationsScreen } from "./screens/NotificationsScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
@@ -41,13 +41,13 @@ export const router = createBrowserRouter([
     loader: ({ request }) => requireSession(request),
   },
   {
-    path: "/scene",
-    Component: SceneFeedScreen,
+    path: "/vibe",
+    Component: VibeFeedScreen,
     loader: ({ request }) => requireSession(request),
   },
   {
-    path: "/scene/:postId",
-    Component: ScenePostScreen,
+    path: "/vibe/:postId",
+    Component: VibePostScreen,
     loader: ({ request }) => requireSession(request),
   },
   {

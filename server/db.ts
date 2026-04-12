@@ -71,7 +71,7 @@ async function resetSchemaIfUserIdNotUuid(): Promise<void> {
   await pool.query(`
     DROP TABLE IF EXISTS messages CASCADE;
     DROP TABLE IF EXISTS chat_threads CASCADE;
-    DROP TABLE IF EXISTS scene_posts CASCADE;
+    DROP TABLE IF EXISTS vibe_posts CASCADE;
     DROP TABLE IF EXISTS notifications CASCADE;
     DROP TABLE IF EXISTS likes CASCADE;
     DROP TABLE IF EXISTS users CASCADE;
@@ -146,7 +146,7 @@ export async function initSchema(): Promise<void> {
       body TEXT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS scene_posts (
+    CREATE TABLE IF NOT EXISTS vibe_posts (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL,

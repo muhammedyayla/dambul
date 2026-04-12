@@ -45,7 +45,7 @@ export function FloatingTabBar() {
     <div className="pointer-events-auto absolute bottom-6 left-1/2 z-[1000] flex w-[min(92vw,420px)] -translate-x-1/2 rounded-full border border-zinc-700/80 bg-zinc-950/95 px-2 py-1 shadow-xl backdrop-blur">
       {tab("/swipe", "Swipe")}
       {tab("/chat", "Chat")}
-      {tab("/scene", "Scene")}
+      {tab("/vibe", "Vibe")}
       {tab("/notifications", "Bildirim", unread)}
     </div>
   );

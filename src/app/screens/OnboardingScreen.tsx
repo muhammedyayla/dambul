@@ -142,7 +142,7 @@ export function OnboardingScreen() {
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("photo", file);
       const up = await fetch(`${API_BASE}/api/upload`, {
         method: "POST",
         body: fd,

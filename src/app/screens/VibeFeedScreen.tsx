@@ -25,14 +25,14 @@ type Post = {
   author_avatar: string | null;
 };
 
-export function SceneFeedScreen() {
+export function VibeFeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [loc, setLoc] = useState("");
 
   const load = async () => {
-    const list = await apiGet<Post[]>("/api/scene/posts");
+    const list = await apiGet<Post[]>("/api/vibe/posts");
     setPosts(list);
   };
 
@@ -42,7 +42,7 @@ export function SceneFeedScreen() {
 
   const create = async () => {
     if (!title.trim()) return;
-    await apiPost("/api/scene/posts", { title: title.trim(), location_tag: loc.trim() || null });
+    await apiPost("/api/vibe/posts", { title: title.trim(), location_tag: loc.trim() || null });
     setTitle("");
     setLoc("");
     setOpen(false);
@@ -53,13 +53,13 @@ export function SceneFeedScreen() {
     <div className="min-h-screen bg-zinc-950 pb-24 text-zinc-100">
       <ChevronToMap />
       <div className="px-4 pt-14">
-        <h1 className="text-2xl font-bold">Sahne</h1>
+        <h1 className="text-2xl font-bold">Vibe</h1>
       </div>
       <ul className="mt-4 space-y-2 px-2">
         {posts.map((p) => (
           <li key={p.id}>
             <Link
-              to={`/scene/${p.id}`}
+              to={`/vibe/${p.id}`}
               className="block rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 transition hover:bg-zinc-900"
             >
               <div className="flex items-start gap-3">

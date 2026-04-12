@@ -45,7 +45,7 @@ export function SettingsScreen() {
     const f = e.target.files?.[0];
     if (!f) return;
     const fd = new FormData();
-    fd.append("file", f);
+    fd.append("photo", f);
     const res = await fetch(`${API_BASE}/api/upload`, { method: "POST", body: fd, credentials: "include" });
     if (!res.ok) return;
     const { url } = (await res.json()) as { url: string };
