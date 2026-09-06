@@ -13,6 +13,12 @@ export async function fetchMe(): Promise<SessionUser | null> {
     return {
       ...j,
       tags: Array.isArray(j.tags) ? (j.tags as string[]) : [],
+      personality_humor: j.personality_humor ?? 50,
+      personality_energy: j.personality_energy ?? 50,
+      personality_lifestyle: j.personality_lifestyle ?? 50,
+      personality_first_step: j.personality_first_step ?? 50,
+      personality_love_language: j.personality_love_language ?? 50,
+      personality_weekend: j.personality_weekend ?? 50,
     };
   } catch {
     // Sunucu kapalı veya ağ hatası — "Failed to fetch" burada yakalanır

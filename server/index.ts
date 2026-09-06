@@ -180,6 +180,10 @@ if (clientId && clientSecret) {
             `INSERT INTO users (google_id, email, name, avatar_url) VALUES ($1, $2, $3, $4) RETURNING *`,
             [googleId, email, name, avatar]
           );
+          await pool.query(
+            `INSERT INTO user_profiles (user_id, preferred_gender) VALUES ($1, 'everyone') ON CONFLICT (user_id) DO NOTHING`,
+            [ins.rows[0].id]
+          );
           return done(null, rowToUser(ins.rows[0]));
         } catch (err) {
           return done(err as Error);
@@ -193,7 +197,7 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(
   cors({
-    origin: FRONTEND_ORIGIN,
+    origin: (origin, callback) => callback(null, true),
     credentials: true,
   })
 );
@@ -221,6 +225,24 @@ function requireLogin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+app.post("/api/auth/dev-login", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM users ORDER BY created_at ASC LIMIT 1");
+    if (!r.rows[0]) return res.status(404).json({ error: "Kullanıcı bulunamadı" });
+    const user = rowToUser(r.rows[0]);
+    await pool.query(
+      `INSERT INTO user_profiles (user_id, preferred_gender) VALUES ($1, 'everyone') ON CONFLICT (user_id) DO NOTHING`,
+      [user.id]
+    );
+    req.login(user, (err) => {
+      if (err) return res.status(500).json({ error: "Giriş başarısız" });
+      res.json({ ok: true, user: publicUser(user) });
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Sunucu hatası" });
+  }
+});
+
 app.get("/api/auth/google", (req, res, next) => {
   if (!clientId || !clientSecret) {
     return res.status(503).json({ error: "Google OAuth yapılandırılmadı" });
@@ -239,9 +261,54 @@ app.get(
   }
 );
 
-app.get("/api/auth/me", (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   if (!req.user) return res.status(401).json({ error: "Giriş gerekli" });
-  res.json(publicUser(req.user));
+  const u = req.user;
+  
+  // Calculate completion
+  const photoCountRes = await pool.query("SELECT COUNT(*) FROM user_photos WHERE user_id = $1", [u.id]);
+  const photoCount = parseInt(photoCountRes.rows[0].count);
+
+  const profRes = await pool.query("SELECT * FROM user_profiles WHERE user_id = $1", [u.id]);
+  const profile = profRes.rows[0] || {};
+  
+  const tags = Array.isArray(u.tags) ? (u.tags as string[]) : [];
+  const personalityFields = [
+    u.personality_humor, u.personality_energy, u.personality_lifestyle,
+    u.personality_first_step, u.personality_love_language, u.personality_weekend
+  ];
+  const hasPersonality = personalityFields.some(v => v !== 50);
+
+  let score = 0;
+  if (u.avatar_url) score += 20;
+  if (photoCount >= 2) score += 20;
+  if (u.bio && u.bio.trim().length > 0) score += 15;
+  if (tags.length >= 1) score += 15;
+  if (u.city) score += 10;
+  if (hasPersonality) score += 10;
+  if (u.birth_date) score += 10;
+
+  const missingPhotosCount = Math.max(0, 2 - photoCount);
+
+  res.json({
+    ...publicUser(u),
+    preferred_gender: profile.preferred_gender || u.pref_gender || "everyone",
+    languages: profile.languages || [],
+    looking_for: profile.looking_for || null,
+    personality_type: profile.personality_type || null,
+    alcohol_habit: profile.alcohol_habit || null,
+    smoking_habit: profile.smoking_habit || null,
+    education_level: profile.education_level || null,
+    family_plans: profile.family_plans || null,
+    communication_style: profile.communication_style || null,
+    pets: profile.pets || null,
+    zodiac_sign: profile.zodiac_sign || null,
+    lifestyle_tags: profile.lifestyle_tags || [],
+    favorite_activities: profile.favorite_activities || [],
+    sports: profile.sports || [],
+    completionPercent: score,
+    missingPhotosCount
+  });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -299,6 +366,32 @@ app.patch("/api/users/me", requireLogin, async (req, res) => {
       "extra_photos",
       "abstract_qa",
     ] as const;
+
+    const profileAllowed = [
+      "preferred_gender",
+      "languages",
+      "looking_for",
+      "personality_type",
+      "alcohol_habit",
+      "smoking_habit",
+      "education_level",
+      "family_plans",
+      "communication_style",
+      "pets",
+      "zodiac_sign",
+      "lifestyle_tags",
+      "favorite_activities",
+      "sports",
+    ] as const;
+
+    const me = req.user!;
+
+    if (b.preferred_gender && !b.pref_gender) {
+      b.pref_gender = b.preferred_gender;
+    } else if (b.pref_gender && !b.preferred_gender) {
+      b.preferred_gender = b.pref_gender;
+    }
+
     const sets: string[] = [];
     const vals: unknown[] = [];
     let i = 1;
@@ -308,16 +401,66 @@ app.patch("/api/users/me", requireLogin, async (req, res) => {
         vals.push(b[key]);
       }
     }
-    const me = req.user!;
-    if (sets.length === 0) return res.json(publicUser(me));
-    sets.push(`updated_at = NOW()`);
-    vals.push(me.id);
-    const q = `UPDATE users SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`;
-    const r = await pool.query(q, vals);
-    const u = rowToUser(r.rows[0]);
-    req.login(u, (err) => {
+
+    let updatedUser = me;
+    if (sets.length > 0) {
+      sets.push(`updated_at = NOW()`);
+      vals.push(me.id);
+      const q = `UPDATE users SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`;
+      const r = await pool.query(q, vals);
+      updatedUser = rowToUser(r.rows[0]);
+    }
+
+    const pSets: string[] = [];
+    const pVals: unknown[] = [];
+    let pi = 1;
+    const arrayCols = new Set(["languages", "lifestyle_tags", "favorite_activities", "sports"]);
+    for (const key of profileAllowed) {
+      if (key in b) {
+        let val = b[key];
+        if (!arrayCols.has(key) && Array.isArray(val)) {
+          val = val.join(", ");
+        }
+        pSets.push(key + " = $" + (pi++));
+        pVals.push(val);
+      }
+    }
+
+    if (pSets.length > 0) {
+      pSets.push(`updated_at = NOW()`);
+      pVals.push(me.id);
+      await pool.query(
+        `INSERT INTO user_profiles (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+        [me.id]
+      );
+      await pool.query(
+        `UPDATE user_profiles SET ${pSets.join(", ")} WHERE user_id = $${pi}`,
+        pVals
+      );
+    }
+
+    const profRes = await pool.query("SELECT * FROM user_profiles WHERE user_id = $1", [me.id]);
+    const profile = profRes.rows[0] || {};
+
+    req.login(updatedUser, (err) => {
       if (err) return res.status(500).json({ error: "Oturum güncellenemedi" });
-      res.json(publicUser(u));
+      res.json({
+        ...publicUser(updatedUser),
+        preferred_gender: profile.preferred_gender || updatedUser.pref_gender || "everyone",
+        languages: profile.languages || [],
+        looking_for: profile.looking_for || null,
+        personality_type: profile.personality_type || null,
+        alcohol_habit: profile.alcohol_habit || null,
+        smoking_habit: profile.smoking_habit || null,
+        education_level: profile.education_level || null,
+        family_plans: profile.family_plans || null,
+        communication_style: profile.communication_style || null,
+        pets: profile.pets || null,
+        zodiac_sign: profile.zodiac_sign || null,
+        lifestyle_tags: profile.lifestyle_tags || [],
+        favorite_activities: profile.favorite_activities || [],
+        sports: profile.sports || [],
+      });
     });
   } catch (e) {
     console.error(e);
@@ -325,32 +468,76 @@ app.patch("/api/users/me", requireLogin, async (req, res) => {
   }
 });
 
-app.get("/api/users/map", requireLogin, async (req, res) => {
+const handleNearbyUsers = async (req: express.Request, res: express.Response) => {
   if (!req.user) return res.status(401).end();
-  const r = await pool.query(
-    `SELECT id, name, avatar_url, lat, lng FROM users
-     WHERE show_on_map = true AND lat IS NOT NULL AND lng IS NOT NULL AND id != $1`,
+
+  const prefRes = await pool.query(
+    `SELECT COALESCE(p.preferred_gender, u.pref_gender, 'everyone') as preferred_gender
+     FROM users u
+     LEFT JOIN user_profiles p ON p.user_id = u.id
+     WHERE u.id = $1`,
     [req.user.id]
   );
-  res.json(r.rows);
-});
+  const pref = (prefRes.rows[0]?.preferred_gender || "everyone").toLowerCase().trim();
+
+  let genderClause = "";
+  if (pref === "female" || pref === "kadın" || pref === "kadin") {
+    genderClause = " AND LOWER(gender) IN ('female', 'kadın', 'kadin')";
+  } else if (pref === "male" || pref === "erkek") {
+    genderClause = " AND LOWER(gender) IN ('male', 'erkek')";
+  }
+
+  const r = await pool.query(
+    `SELECT u.id, u.name, u.avatar_url, u.lat, u.lng, u.gender, u.city, u.birth_date,
+            (SELECT url FROM user_photos WHERE user_id = u.id ORDER BY order_index ASC LIMIT 1) as first_photo
+     FROM users u
+     WHERE u.show_on_map = true 
+       AND u.lat IS NOT NULL 
+       AND u.lng IS NOT NULL 
+       AND u.id != $1
+       ${genderClause}`,
+    [req.user.id]
+  );
+  const out = r.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    avatar_url: row.first_photo || row.avatar_url,
+    lat: row.lat,
+    lng: row.lng,
+    gender: row.gender,
+    city: row.city,
+    age: ageFromBirth(row.birth_date) || 24,
+  }));
+  res.json(out);
+};
+
+app.get("/api/users/nearby", requireLogin, handleNearbyUsers);
+app.get("/api/users/map", requireLogin, handleNearbyUsers);
 
 app.get("/api/users/swipe", requireLogin, async (req, res) => {
   if (!req.user) return res.status(401).end();
-  const gender = (req.query.gender as string) || "all";
+  const userPref = req.user.pref_gender || "everyone";
+  const genderQuery = req.query.gender as string | undefined;
+  const gender = genderQuery && genderQuery !== "all" ? genderQuery : userPref;
   const params: unknown[] = [req.user.id];
   let genderFilter = "";
-  if (gender === "female" || gender === "Kadın") {
-    genderFilter = " AND gender = 'female' ";
-  } else if (gender === "male" || gender === "Erkek") {
-    genderFilter = " AND gender = 'male' ";
-  } else if (gender === "other" || gender === "Diğer") {
-    genderFilter = " AND gender = 'other' ";
+  if (gender === "female" || gender === "Kadın" || gender === "kadin") {
+    genderFilter = " AND LOWER(u.gender) IN ('female', 'kadın', 'kadin') ";
+  } else if (gender === "male" || gender === "Erkek" || gender === "erkek") {
+    genderFilter = " AND LOWER(u.gender) IN ('male', 'erkek') ";
+  } else if (gender === "other" || gender === "Diğer" || gender === "diger") {
+    genderFilter = " AND LOWER(u.gender) IN ('other', 'diğer', 'diger') ";
   }
   const r = await pool.query(
     `SELECT u.*, 
-            (SELECT url FROM user_photos WHERE user_id = u.id ORDER BY order_index ASC LIMIT 1) as first_photo
+            p.preferred_gender, p.languages, p.looking_for, p.personality_type,
+            p.alcohol_habit, p.smoking_habit, p.education_level, p.family_plans,
+            p.communication_style, p.pets, p.zodiac_sign, p.lifestyle_tags,
+            p.favorite_activities, p.sports,
+            (SELECT url FROM user_photos WHERE user_id = u.id ORDER BY order_index ASC LIMIT 1) as first_photo,
+            (SELECT COALESCE(json_agg(url ORDER BY order_index ASC), '[]'::json) FROM user_photos WHERE user_id = u.id) as photos
      FROM users u
+     LEFT JOIN user_profiles p ON p.user_id = u.id
      WHERE u.id != $1
      AND u.id NOT IN (SELECT to_user FROM likes WHERE from_user = $1)
      ${genderFilter}
@@ -360,9 +547,28 @@ app.get("/api/users/swipe", requireLogin, async (req, res) => {
   );
   const out = r.rows.map((row) => {
     const u = rowToUser(row);
+    const photosArr = Array.isArray(row.photos) && row.photos.length > 0
+      ? row.photos
+      : (row.first_photo ? [row.first_photo] : (u.avatar_url ? [u.avatar_url] : []));
     return {
       ...publicOtherUser(u),
       age: ageFromBirth(u.birth_date),
+      first_photo: photosArr[0] || u.avatar_url,
+      photos: photosArr,
+      preferred_gender: row.preferred_gender,
+      languages: row.languages || [],
+      looking_for: row.looking_for,
+      personality_type: row.personality_type,
+      alcohol_habit: row.alcohol_habit,
+      smoking_habit: row.smoking_habit,
+      education_level: row.education_level,
+      family_plans: row.family_plans,
+      communication_style: row.communication_style,
+      pets: row.pets,
+      zodiac_sign: row.zodiac_sign,
+      lifestyle_tags: row.lifestyle_tags,
+      favorite_activities: row.favorite_activities,
+      sports: row.sports,
     };
   });
   res.json(out);
@@ -581,15 +787,99 @@ app.get("/api/notifications/unread-count", requireLogin, async (req, res) => {
   res.json({ count: c.rows[0].n });
 });
 
+app.post("/api/wave", requireLogin, async (req, res) => {
+  if (!req.user) return res.status(401).end();
+  const { target_user_id } = req.body as { target_user_id?: string };
+  if (!target_user_id) return res.status(400).json({ error: "target_user_id gerekli" });
+  if (target_user_id === req.user.id) return res.status(400).json({ error: "Kendine el sallayamazsın" });
+
+  const target = await pool.query(`SELECT id, name FROM users WHERE id = $1`, [target_user_id]);
+  if (!target.rows.length) return res.status(404).json({ error: "Kullanıcı bulunamadı" });
+
+  await pool.query(
+    `INSERT INTO notifications (user_id, actor_id, action) VALUES ($1, $2, $3)`,
+    [target_user_id, req.user.id, "sana el salladı! 👋"]
+  );
+
+  res.json({ ok: true, message: "El sallandı! 👋" });
+});
+
 app.get("/api/users/:userId", requireLogin, async (req, res) => {
-  const r = await pool.query("SELECT * FROM users WHERE id = $1", [req.params.userId]);
+  const currentUserId = req.user!.id;
+  const targetUserId = req.params.userId;
+  const r = await pool.query(
+    `SELECT u.*, 
+            p.preferred_gender, p.languages, p.looking_for, p.personality_type,
+            p.alcohol_habit, p.smoking_habit, p.education_level, p.family_plans,
+            p.communication_style, p.pets, p.zodiac_sign, p.lifestyle_tags,
+            p.favorite_activities, p.sports,
+            (SELECT type FROM likes WHERE from_user = $1 AND to_user = $2) as existing_vote,
+            (SELECT COALESCE(json_agg(url ORDER BY order_index ASC), '[]'::json) FROM user_photos WHERE user_id = u.id) as photos
+     FROM users u
+     LEFT JOIN user_profiles p ON p.user_id = u.id
+     WHERE u.id = $2`,
+    [currentUserId, targetUserId]
+  );
   if (!r.rows.length) return res.status(404).json({ error: "Bulunamadı" });
-  const u = rowToUser(r.rows[0]);
+  const row = r.rows[0];
+  const u = rowToUser(row);
+  const photosArr = Array.isArray(row.photos) && row.photos.length > 0
+    ? row.photos
+    : (u.avatar_url ? [u.avatar_url] : []);
   res.json({
     ...publicOtherUser(u),
     age: ageFromBirth(u.birth_date),
-    email: req.user?.id === u.id ? u.email : undefined,
+    photos: photosArr,
+    existing_vote: row.existing_vote || null,
+    preferred_gender: row.preferred_gender,
+    languages: row.languages || [],
+    looking_for: row.looking_for,
+    personality_type: row.personality_type,
+    alcohol_habit: row.alcohol_habit,
+    smoking_habit: row.smoking_habit,
+    education_level: row.education_level,
+    family_plans: row.family_plans,
+    communication_style: row.communication_style,
+    pets: row.pets,
+    zodiac_sign: row.zodiac_sign,
+    lifestyle_tags: row.lifestyle_tags || [],
+    favorite_activities: row.favorite_activities || [],
+    sports: row.sports || [],
   });
+});
+
+app.post("/api/reports", requireLogin, async (req, res) => {
+  try {
+    const { target_user_id, reason } = req.body as { target_user_id?: string; reason?: string };
+    if (!target_user_id || !reason) return res.status(400).json({ error: "Eksik parametre" });
+    await pool.query(
+      `INSERT INTO reports (reporter_id, target_user_id, reason) VALUES ($1, $2, $3)`,
+      [req.user!.id, target_user_id, reason]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("Report error:", e);
+    res.status(500).json({ error: "Rapor kaydedilemedi" });
+  }
+});
+
+app.post("/api/blocks", requireLogin, async (req, res) => {
+  try {
+    const { blocked_user_id } = req.body as { blocked_user_id?: string };
+    if (!blocked_user_id) return res.status(400).json({ error: "Eksik parametre" });
+    await pool.query(
+      `INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT (blocker_id, blocked_id) DO NOTHING`,
+      [req.user!.id, blocked_user_id]
+    );
+    await pool.query(
+      `INSERT INTO likes (from_user, to_user, type) VALUES ($1, $2, 'pass') ON CONFLICT (from_user, to_user) DO UPDATE SET type = 'pass'`,
+      [req.user!.id, blocked_user_id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("Block error:", e);
+    res.status(500).json({ error: "Engelleme kaydedilemedi" });
+  }
 });
 
 app.post("/api/profile-views", requireLogin, async (req, res) => {

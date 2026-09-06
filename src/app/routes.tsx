@@ -65,4 +65,6 @@ export const router = createBrowserRouter([
     Component: SettingsScreen,
     loader: ({ request }) => requireSession(request),
   },
-]);
+], {
+  // hydrateFallbackElement: <div className="p-10 text-center text-zinc-500">Yükleniyor...</div>
+});

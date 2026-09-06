@@ -13,10 +13,11 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { apiPatch, API_BASE } from "../api";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../components/ui/utils";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { PersonalitySliders, barsToDb } from "../components/PersonalitySliders";
 
-const MAP_TOKEN = import.meta.env.VITE_MAP_BOX_TOKEN;
+const MAP_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ""; // Mapbox token from environment
 
 type MapPlace = {
   id: string;
@@ -43,10 +44,7 @@ async function searchPlaces(query: string): Promise<MapPlace[]> {
   }));
 }
 
-/** 0–19 çubuk indeksi → DB’de 0–100 */
-function barsToDb(b: number): number {
-  return Math.round((b / 19) * 100);
-}
+/** barsToDb is now imported from PersonalitySliders */
 
 function ageToBirthDate(age: number): string {
   const d = new Date();
@@ -75,12 +73,14 @@ export function OnboardingScreen() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
-  const [humor, setHumor] = useState(9);
-  const [energy, setEnergy] = useState(9);
-  const [lifestyle, setLifestyle] = useState(9);
-  const [firstStep, setFirstStep] = useState(9);
-  const [loveLang, setLoveLang] = useState(9);
-  const [weekend, setWeekend] = useState(9);
+  const [personality, setPersonality] = useState({
+    personality_humor: 50,
+    personality_energy: 50,
+    personality_lifestyle: 50,
+    personality_first_step: 50,
+    personality_love_language: 50,
+    personality_weekend: 50,
+  });
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -174,12 +174,7 @@ export function OnboardingScreen() {
         bio: bio.trim() || null,
         avatar_url,
         tags: [],
-        personality_humor: barsToDb(humor),
-        personality_energy: barsToDb(energy),
-        personality_lifestyle: barsToDb(lifestyle),
-        personality_first_step: barsToDb(firstStep),
-        personality_love_language: barsToDb(loveLang),
-        personality_weekend: barsToDb(weekend),
+        ...personality,
       });
       revalidator.revalidate();
       navigate("/map");
@@ -304,47 +299,9 @@ export function OnboardingScreen() {
             />
           </div>
 
-          <BarScale20
-            label="Mizahın"
-            left="Alaycı"
-            right="Pozitif"
-            value={humor}
-            onChange={setHumor}
-          />
-          <BarScale20
-            label="Enerji"
-            left="İçe dönük"
-            right="Dışa dönük"
-            value={energy}
-            onChange={setEnergy}
-          />
-          <BarScale20
-            label="Yaşam tarzın"
-            left="Güvenli"
-            right="Maceracı"
-            value={lifestyle}
-            onChange={setLifestyle}
-          />
-          <BarScale20
-            label="İlk adım"
-            left="Ben atarım"
-            right="Beklerim"
-            value={firstStep}
-            onChange={setFirstStep}
-          />
-          <BarScale20
-            label="Aşk dilin"
-            left="Kelime"
-            right="Dokunma"
-            value={loveLang}
-            onChange={setLoveLang}
-          />
-          <BarScale20
-            label="Hafta sonu"
-            left="Evde chill"
-            right="Macera"
-            value={weekend}
-            onChange={setWeekend}
+          <PersonalitySliders 
+            values={personality} 
+            onChange={(key, val) => setPersonality(p => ({ ...p, [key]: val }))} 
           />
 
           {err ? <p className="text-sm text-rose-400">{err}</p> : null}

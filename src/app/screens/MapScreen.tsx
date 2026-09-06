@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
-import mapboxgl from "mapbox-gl";
+import maplibregl from "maplibre-gl";
 import { MapPin, Clock, CloudSun, Rocket, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { FloatingTabBar } from "../components/FloatingTabBar";
@@ -9,14 +9,12 @@ import type { SessionUser } from "../types";
 
 type MapUser = { id: string; name: string; avatar_url: string | null; lat: number; lng: number };
 
-const token = import.meta.env.VITE_MAP_BOX_TOKEN;
-
 export function MapScreen() {
   const loaderData = useLoaderData() as SessionUser;
   const navigate = useNavigate();
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
   const [clock, setClock] = useState(() => new Date());
 
   useEffect(() => {
@@ -25,44 +23,24 @@ export function MapScreen() {
   }, []);
 
   useEffect(() => {
-    if (!token?.trim() || !wrapRef.current) return;
+    if (!wrapRef.current) return;
 
-    mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
       container: wrapRef.current,
-      style: "mapbox://styles/mapbox/dark-v11",
+      style: "https://tiles.openfreemap.org/styles/bright",
       center:
         loaderData.lng != null && loaderData.lat != null ? [loaderData.lng, loaderData.lat] : [28.9784, 41.0082],
-      zoom: 2,
-      projection: "globe",
-      optimizeForTerrain: false,
+      zoom: 12,
+      pitch: 45,
+      bearing: -17.6,
+      canvasContextAttributes: { antialias: true }
     });
     map.dragRotate.enable();
     map.touchZoomRotate.enableRotation();
     mapRef.current = map;
 
     map.on("style.load", () => {
-      map.setFog({});
-
-      if (!map.getSource("mapbox-dem")) {
-        map.addSource("mapbox-dem", {
-          type: "raster-dem",
-          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-          tileSize: 512,
-          maxzoom: 14,
-        });
-      }
-
-      if (!map.getLayer("hillshading")) {
-        map.addLayer(
-          {
-            id: "hillshading",
-            source: "mapbox-dem",
-            type: "hillshade",
-          },
-          "waterway-label"
-        );
-      }
+      // Style loaded
     });
 
     map.on("load", () => {
@@ -70,9 +48,11 @@ export function MapScreen() {
         try {
           const list = await apiGet<MapUser[]>("/api/users/map");
 
+          const filteredList = list.filter(u => u.lng != null && u.lat != null);
+
           const geojson: GeoJSON.FeatureCollection = {
             type: "FeatureCollection",
-            features: list.map((u) => ({
+            features: filteredList.map((u) => ({
               type: "Feature",
               properties: { id: u.id },
               geometry: { type: "Point", coordinates: [u.lng, u.lat] },
@@ -93,12 +73,12 @@ export function MapScreen() {
               },
             });
           } else {
-            (map.getSource("users-heat") as mapboxgl.GeoJSONSource).setData(geojson);
+            (map.getSource("users-heat") as maplibregl.GeoJSONSource).setData(geojson);
           }
 
           markersRef.current.forEach((m) => m.remove());
           markersRef.current = [];
-          list.forEach((u) => {
+          filteredList.forEach((u) => {
             const el = document.createElement("button");
             el.type = "button";
             el.className =
@@ -115,13 +95,58 @@ export function MapScreen() {
               el.className += " text-sm font-bold text-white";
             }
             el.addEventListener("click", () => navigate(`/profile/${u.id}`));
-            const marker = new mapboxgl.Marker({ element: el }).setLngLat([u.lng, u.lat]).addTo(map);
+            const marker = new maplibregl.Marker({ element: el }).setLngLat([u.lng, u.lat]).addTo(map);
             markersRef.current.push(marker);
           });
         } catch {
           toast.error("Harita verileri yüklenemedi");
         }
       })();
+
+      // 3D bina katmanı ekle
+      const layers = map.getStyle().layers;
+      let labelLayerId;
+      for (let i = 0; i < layers.length; i++) {
+        if (layers[i].type === 'symbol' && layers[i].layout['text-field']) {
+          labelLayerId = layers[i].id;
+          break;
+        }
+      }
+      map.addSource('openfreemap', {
+        url: 'https://tiles.openfreemap.org/planet',
+        type: 'vector'
+      });
+      map.addLayer({
+        id: '3d-buildings',
+        source: 'openfreemap',
+        'source-layer': 'building',
+        type: 'fill-extrusion',
+        minzoom: 15,
+        filter: ['!=', ['get', 'hide_3d'], true],
+        paint: {
+          'fill-extrusion-color': [
+            'interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 0],
+            0, 'lightgray', 200, 'royalblue', 400, 'lightblue'
+          ],
+          'fill-extrusion-height': [
+            'interpolate', ['linear'], ['zoom'],
+            15, 0, 16, ['coalesce', ['get', 'render_height'], 0]
+          ],
+          'fill-extrusion-base': [
+            'case', ['>=', ['get', 'zoom'], 16],
+            ['coalesce', ['get', 'render_min_height'], 0], 0
+          ]
+        }
+      }, labelLayerId);
+    });
+
+    map.on("styleimagemissing", (e) => {
+      const emptyImage = {
+        width: 1,
+        height: 1,
+        data: new Uint8Array(4),
+      };
+      map.addImage(e.id, emptyImage as any);
     });
 
     return () => {
@@ -131,17 +156,6 @@ export function MapScreen() {
       mapRef.current = null;
     };
   }, [loaderData.lat, loaderData.lng, loaderData.id, navigate]);
-
-  if (!token?.trim()) {
-    return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 px-6 text-center text-zinc-100">
-        <p className="text-lg font-semibold">Harita anahtarı eksik</p>
-        <p className="max-w-md text-sm text-zinc-400">
-          `.env` dosyasında `map_box_token` tanımlı olmalı ve Vite yeniden başlatılmalıdır.
-        </p>
-      </div>
-    );
-  }
 
   const cityLabel = loaderData.city || "Konum";
 

@@ -28,6 +28,8 @@ export type SessionUser = {
   extra_photos: unknown;
   abstract_qa: unknown;
   email?: string | null;
+  completionPercent?: number;
+  missingPhotosCount?: number;
 };
 
 export function profileComplete(u: SessionUser): boolean {

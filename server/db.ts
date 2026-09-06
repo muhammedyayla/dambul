@@ -153,5 +153,40 @@ export async function initSchema(): Promise<void> {
       location_tag TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      preferred_gender VARCHAR(20),
+      languages TEXT[],
+      looking_for VARCHAR(50),
+      personality_type VARCHAR(100),
+      alcohol_habit VARCHAR(50),
+      smoking_habit VARCHAR(50),
+      education_level VARCHAR(100),
+      family_plans VARCHAR(100),
+      communication_style VARCHAR(100),
+      pets VARCHAR(50),
+      zodiac_sign VARCHAR(20),
+      lifestyle_tags TEXT[], 
+      favorite_activities TEXT[],
+      sports TEXT[],
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles(user_id);
+    CREATE TABLE IF NOT EXISTS reports (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS blocks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      blocker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(blocker_id, blocked_id)
+    );
   `);
 }
