@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { apiGet, apiPost } from "../../src/api";
 import { ProfileDetailView, ProfileDetailUser } from "../../src/components/ProfileDetailView";
+import type { SessionUser } from "../../src/types";
 
 export default function ProfileScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
@@ -17,6 +18,11 @@ export default function ProfileScreen() {
     if (!userId) return;
     void (async () => {
       try {
+        const me = await apiGet<SessionUser>("/api/auth/me");
+        if (me.id === userId) {
+          router.replace("/settings" as any);
+          return;
+        }
         const prof = await apiGet<ProfileDetailUser>(`/api/users/${userId}`);
         setProfile(prof);
         setCurrentVote(prof.existing_vote || null);
@@ -27,7 +33,7 @@ export default function ProfileScreen() {
         setLoading(false);
       }
     })();
-  }, [userId]);
+  }, [userId, router]);
 
   // Re-vote handler ("Fikrin mi değişti?")
   const handleReVote = async (type: "like" | "pass") => {

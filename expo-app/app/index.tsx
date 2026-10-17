@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { View, Text, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { apiFetch } from "../src/api";
+import { getToken } from "../src/auth";
 import { profileComplete, type SessionUser } from "../src/types";
 
 export default function IndexScreen() {
@@ -12,6 +13,14 @@ export default function IndexScreen() {
 
     async function checkAuth() {
       try {
+        // Check if we have a stored token first
+        const token = await getToken();
+        if (!token) {
+          // No token stored, go to login
+          if (!cancelled) router.replace("/login");
+          return;
+        }
+
         const res = await apiFetch("/api/auth/me");
         if (cancelled) return;
         if (res.status === 401 || !res.ok) {

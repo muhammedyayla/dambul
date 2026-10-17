@@ -649,7 +649,7 @@ async function seed() {
   const activeUsersRes = await pool.query(
     `SELECT id, name FROM users WHERE google_id NOT LIKE 'seed_user_%' ORDER BY created_at ASC`
   );
-  
+
   const testUsers = activeUsersRes.rows;
   console.log(`Found ${testUsers.length} test/human accounts to link with Chat Matches.`);
 

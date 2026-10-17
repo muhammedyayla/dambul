@@ -10,18 +10,39 @@ import multer from "multer";
 import { Rest as AblyRest } from "ably";
 import { put } from "@vercel/blob";
 import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
 import { v2 as cloudinary } from "cloudinary";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { pool, initSchema } from "./db.js";
 import type { Request, Response, NextFunction } from "express";
 
 dotenv.config();
 
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "dambul-jwt-secret-change-in-prod";
+
+function signToken(userId: string): string {
+  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: "30d" });
+}
+
+function verifyToken(token: string): string | null {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
+    return payload.sub;
+  } catch {
+    return null;
+  }
+}
+
 const FRONTEND_ORIGIN = "http://localhost:5173";
+const CLOUDINARY_CLOUD =
+  process.env.cloudinary_cloud_name || process.env.CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_KEY = process.env.cloudinary_api_key || process.env.CLOUDINARY_API_KEY;
+const CLOUDINARY_SECRET =
+  process.env.cloudinary_api_secret || process.env.CLOUDINARY_API_SECRET;
+
 cloudinary.config({
-  cloud_name: process.env.cloudinary_cloud_name,
-  api_key: process.env.cloudinary_api_key,
-  api_secret: process.env.cloudinary_api_secret,
+  cloud_name: CLOUDINARY_CLOUD,
+  api_key: CLOUDINARY_KEY,
+  api_secret: CLOUDINARY_SECRET,
 });
 
 const API_PORT = Number(process.env.PORT) || 3001;
@@ -29,15 +50,101 @@ const CALLBACK_URL =
   process.env.GOOGLE_CALLBACK_URL ||
   "http://localhost:3001/api/auth/google/callback";
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "dambull",
-    allowed_formats: ["jpg", "png", "jpeg", "webp", "avif"],
-  } as any,
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
 });
 
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+function isCloudinaryReady(): boolean {
+  return Boolean(CLOUDINARY_CLOUD && CLOUDINARY_KEY && CLOUDINARY_SECRET);
+}
+
+function publicBaseUrl(req: Request): string {
+  const forwarded = req.headers["x-forwarded-proto"];
+  const proto =
+    (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim() ||
+    req.protocol ||
+    "http";
+  const host = req.get("host") || `localhost:${API_PORT}`;
+  return `${proto}://${host}`;
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function getGoogleCallbackUrl(req?: Request, mobile = false): string {
+  const configuredCallbackUrl = process.env.GOOGLE_CALLBACK_URL;
+  if (configuredCallbackUrl && !(mobile && isLoopbackUrl(configuredCallbackUrl))) {
+    return configuredCallbackUrl;
+  }
+  if (req) {
+    return `${publicBaseUrl(req)}/api/auth/google/callback`;
+  }
+  return configuredCallbackUrl || CALLBACK_URL;
+}
+
+async function persistImageBuffer(
+  req: Request,
+  buffer: Buffer,
+  mime = "image/jpeg"
+): Promise<{ url: string; public_id: string | null }> {
+  if (!buffer?.length) {
+    throw new Error("empty");
+  }
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error("too_large");
+  }
+
+  if (isCloudinaryReady()) {
+    try {
+      const result = await new Promise<{ secure_url: string; public_id: string }>(
+        (resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: "dambull",
+              resource_type: "image",
+              format: "jpg",
+              transformation: [
+                { width: 1600, height: 1600, crop: "limit", quality: "auto:good" },
+              ],
+            },
+            (err, uploaded) => {
+              if (err || !uploaded?.secure_url) {
+                reject(err || new Error("Cloudinary yanıtı boş"));
+                return;
+              }
+              resolve({
+                secure_url: uploaded.secure_url,
+                public_id: uploaded.public_id,
+              });
+            }
+          );
+          stream.end(buffer);
+        }
+      );
+      return { url: result.secure_url, public_id: result.public_id };
+    } catch (err) {
+      console.error("[upload] Cloudinary başarısız, yerel depolama:", err);
+    }
+  }
+
+  const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+  const filename = `${randomUUID()}.${ext}`;
+  const dir = path.join(process.cwd(), "uploads");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, filename), buffer);
+  return {
+    url: `${publicBaseUrl(req)}/uploads/${filename}`,
+    public_id: `local/${filename}`,
+  };
+}
 
 export type DbUser = {
   id: string;
@@ -148,8 +255,8 @@ passport.deserializeUser(async (id: string, done) => {
   }
 });
 
-const clientId = process.env.google_oauth_client_id;
-const clientSecret = process.env.google_oauth_client_secret;
+const clientId = process.env.google_oauth_client_id || process.env.GOOGLE_CLIENT_ID;
+const clientSecret = process.env.google_oauth_client_secret || process.env.GOOGLE_CLIENT_SECRET;
 
 if (clientId && clientSecret) {
   passport.use(
@@ -201,7 +308,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "8mb" }));
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use(
   session({
@@ -220,6 +327,27 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
+/** Global middleware: check Bearer token when no session cookie */
+async function resolveTokenUser(req: Request, _res: Response, next: NextFunction) {
+  if (req.user) return next(); // already resolved via session
+  const auth = req.headers.authorization;
+  if (auth?.startsWith("Bearer ")) {
+    const token = auth.slice(7);
+    const userId = verifyToken(token);
+    if (userId) {
+      try {
+        const r = await pool.query<Record<string, unknown>>("SELECT * FROM users WHERE id = $1", [userId]);
+        if (r.rows[0]) {
+          (req as any).user = rowToUser(r.rows[0]);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  next();
+}
+
+app.use(resolveTokenUser);
+
 function requireLogin(req: Request, res: Response, next: NextFunction) {
   if (!req.user) return res.status(401).json({ error: "Giriş gerekli" });
   next();
@@ -227,18 +355,50 @@ function requireLogin(req: Request, res: Response, next: NextFunction) {
 
 app.post("/api/auth/dev-login", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM users ORDER BY created_at ASC LIMIT 1");
-    if (!r.rows[0]) return res.status(404).json({ error: "Kullanıcı bulunamadı" });
+    let r = await pool.query("SELECT * FROM users ORDER BY created_at ASC LIMIT 1");
+
+    // Kullanıcı yoksa otomatik seed kullanıcısı oluştur
+    if (!r.rows[0]) {
+      console.log("[dev-login] Kullanıcı bulunamadı — otomatik test kullanıcısı oluşturuluyor...");
+      const devGoogleId = "dev-test-user-001";
+      const ins = await pool.query(
+        `INSERT INTO users (google_id, email, name, avatar_url, city, lat, lng, gender, bio, show_on_map)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (google_id) DO UPDATE SET name = EXCLUDED.name
+         RETURNING *`,
+        [
+          devGoogleId,
+          "dev@dambul.app",
+          "Dev Kullanıcı",
+          "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80",
+          "İstanbul",
+          41.015137,
+          28.979530,
+          "male",
+          "Geliştirici test hesabı 🚀",
+          true,
+        ]
+      );
+      await pool.query(
+        `INSERT INTO user_profiles (user_id, preferred_gender) VALUES ($1, 'everyone') ON CONFLICT (user_id) DO NOTHING`,
+        [ins.rows[0].id]
+      );
+      r = await pool.query("SELECT * FROM users WHERE google_id = $1", [devGoogleId]);
+      console.log(`[dev-login] Test kullanıcısı oluşturuldu: ${r.rows[0].id}`);
+    }
+
     const user = rowToUser(r.rows[0]);
     await pool.query(
       `INSERT INTO user_profiles (user_id, preferred_gender) VALUES ($1, 'everyone') ON CONFLICT (user_id) DO NOTHING`,
       [user.id]
     );
+    const token = signToken(user.id);
     req.login(user, (err) => {
       if (err) return res.status(500).json({ error: "Giriş başarısız" });
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicUser(user), token });
     });
   } catch (e) {
+    console.error("[dev-login] Hata:", e);
     res.status(500).json({ error: "Sunucu hatası" });
   }
 });
@@ -247,19 +407,169 @@ app.get("/api/auth/google", (req, res, next) => {
   if (!clientId || !clientSecret) {
     return res.status(503).json({ error: "Google OAuth yapılandırılmadı" });
   }
-  passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
+  // mobile_redirect_uri: Expo'nun Linking.createURL() çıktısı (exp://... veya dambul://...)
+  const mobileRedirectUri = req.query.mobile_redirect_uri as string | undefined;
+  const callbackURL = getGoogleCallbackUrl(req, Boolean(mobileRedirectUri));
+  if (mobileRedirectUri) {
+    let callback: URL;
+    try {
+      callback = new URL(callbackURL);
+    } catch {
+      console.error(`[google-auth] Geçersiz mobil callback URI: ${callbackURL}`);
+      return res.status(400).json({
+        error: "Mobil Google OAuth callback adresi geçersiz. HTTPS tünel adresi kullanın.",
+      });
+    }
+    if (callback.protocol !== "https:" || isLoopbackUrl(callbackURL)) {
+      console.error(
+        `[google-auth] Mobil OAuth için HTTPS ve localhost olmayan public callback gerekli. ` +
+          `Mevcut URI: ${callbackURL}. GOOGLE_CALLBACK_URL değerini HTTPS tünel adresinizle ayarlayın.`
+      );
+      return res.status(400).json({
+        error:
+          "Mobil Google OAuth için HTTPS ve localhost olmayan bir public callback adresi gerekli. " +
+          "localhost veya yerel ağ IP adresi kullanmayın; HTTPS tünel adresinizi GOOGLE_CALLBACK_URL olarak ayarlayın.",
+      });
+    }
+    console.info(`[google-auth] Mobil callback URI: ${callbackURL}`);
+  }
+
+  // State içine mobile_redirect_uri ve kullanılan callbackURL'i encode ediyoruz
+  const statePayload = JSON.stringify({
+    mobileUri: mobileRedirectUri,
+    callbackURL,
+  });
+  const state = Buffer.from(statePayload).toString("base64url");
+
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    callbackURL,
+    state,
+  } as any)(req, res, next);
 });
 
 app.get(
   "/api/auth/google/callback",
-  passport.authenticate("google", {
-    failureRedirect: `${FRONTEND_ORIGIN}/login`,
-    session: true,
-  }),
-  (_req, res) => {
+  (req, res, next) => {
+    let callbackURL = getGoogleCallbackUrl(req);
+    let mobileUri: string | null = null;
+    const stateRaw = req.query.state as string | undefined;
+
+    if (stateRaw) {
+      try {
+        const parsed = JSON.parse(Buffer.from(stateRaw, "base64url").toString("utf8"));
+        if (parsed.callbackURL) callbackURL = parsed.callbackURL;
+        if (parsed.mobileUri) mobileUri = parsed.mobileUri;
+      } catch {
+        try {
+          mobileUri = decodeURIComponent(stateRaw);
+        } catch {}
+      }
+    }
+
+    (req as any)._mobileRedirectUri = mobileUri;
+
+    passport.authenticate("google", {
+      callbackURL,
+      failureRedirect: `${FRONTEND_ORIGIN}/login?error=auth_failed`,
+      session: true,
+    } as any)(req, res, next);
+  },
+  (req, res) => {
+    const user = req.user as DbUser;
+    const token = signToken(user.id);
+    const mobileUri = (req as any)._mobileRedirectUri;
+
+    if (mobileUri) {
+      const separator = mobileUri.includes("?") ? "&" : "?";
+      return res.redirect(`${mobileUri}${separator}token=${token}`);
+    }
     res.redirect(`${FRONTEND_ORIGIN}/map`);
   }
 );
+
+/**
+ * Mobil Google OAuth (expo-auth-session):
+ * Frontend, Google'dan aldığı access_token veya id_token'ı buraya gönderir.
+ * Backend token'ı doğrular, kullanıcıyı bulur/oluşturur ve JWT döner.
+ */
+app.post("/api/auth/google/mobile", async (req, res) => {
+  const { access_token, id_token } = req.body as { access_token?: string; id_token?: string };
+  if (!access_token && !id_token) {
+    return res.status(400).json({ error: "access_token veya id_token gerekli" });
+  }
+  try {
+    let googleId = "";
+    let email: string | null = null;
+    let name = "Kullanıcı";
+    let avatar: string | null = null;
+
+    if (id_token) {
+      const gRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(id_token)}`
+      );
+      if (!gRes.ok) {
+        return res.status(401).json({ error: "Geçersiz Google id_token" });
+      }
+      const payload = (await gRes.json()) as any;
+      googleId = payload.sub;
+      email = payload.email ?? null;
+      name = payload.name || payload.given_name || "Kullanıcı";
+      avatar = payload.picture ?? null;
+    } else if (access_token) {
+      const gRes = await fetch(
+        `https://www.googleapis.com/oauth2/v2/userinfo?access_token=${encodeURIComponent(access_token)}`
+      );
+      if (!gRes.ok) {
+        return res.status(401).json({ error: "Geçersiz Google access_token" });
+      }
+      const gUser = (await gRes.json()) as any;
+      googleId = gUser.id;
+      email = gUser.email ?? null;
+      name = gUser.name || "Kullanıcı";
+      avatar = gUser.picture ?? null;
+    }
+
+    if (!googleId) {
+      return res.status(401).json({ error: "Google profil bilgisi alınamadı" });
+    }
+
+    // Kullanıcıyı bul veya oluştur
+    const existing = await pool.query("SELECT * FROM users WHERE google_id = $1", [googleId]);
+    let user: DbUser;
+    if (existing.rows[0]) {
+      await pool.query(
+        `UPDATE users SET email = COALESCE($1, email), name = $2, avatar_url = COALESCE($3, avatar_url), updated_at = NOW() WHERE google_id = $4`,
+        [email, name, avatar, googleId]
+      );
+      const u = await pool.query("SELECT * FROM users WHERE google_id = $1", [googleId]);
+      user = rowToUser(u.rows[0]);
+    } else {
+      const ins = await pool.query(
+        `INSERT INTO users (google_id, email, name, avatar_url) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [googleId, email, name, avatar]
+      );
+      await pool.query(
+        `INSERT INTO user_profiles (user_id, preferred_gender) VALUES ($1, 'everyone') ON CONFLICT (user_id) DO NOTHING`,
+        [ins.rows[0].id]
+      );
+      user = rowToUser(ins.rows[0]);
+    }
+
+    const token = signToken(user.id);
+    req.login(user, (err) => {
+      if (err) {
+        // Oturum hatası olsa bile JWT ile devam et
+        console.warn("[mobile-auth] req.login hatası (JWT ile devam):", err?.message);
+      }
+      res.json({ ok: true, user: publicUser(user), token });
+    });
+  } catch (err) {
+    console.error("[mobile-auth] Hata:", err);
+    res.status(500).json({ error: "Kimlik doğrulama başarısız" });
+  }
+});
+
 
 app.get("/api/auth/me", async (req, res) => {
   if (!req.user) return res.status(401).json({ error: "Giriş gerekli" });
@@ -322,15 +632,37 @@ app.post("/api/auth/logout", (req, res) => {
   });
 });
 
-app.post("/api/upload", requireLogin, upload.single("photo"), async (req, res) => {
+app.post("/api/upload", requireLogin, (req, res, next) => {
+  const ct = String(req.headers["content-type"] || "");
+  if (ct.includes("multipart/form-data")) {
+    return upload.single("photo")(req, res, next);
+  }
+  next();
+}, async (req, res) => {
   try {
-    const file = req.file;
-    if (!file) return res.status(400).json({ error: "Dosya yok" });
-    // Cloudinary storage automatically uploads and fills req.file.path
-    res.json({ url: (file as any).path || (file as any).secure_url });
+    let buffer: Buffer | null = null;
+    let mime = "image/jpeg";
+
+    if (req.file?.buffer) {
+      buffer = req.file.buffer;
+      mime = req.file.mimetype || mime;
+    } else {
+      const body = req.body as { image_base64?: string; mime?: string };
+      const raw = body?.image_base64;
+      if (!raw || typeof raw !== "string") {
+        return res.status(400).json({ error: "Dosya yok" });
+      }
+      mime = body.mime || mime;
+      const cleaned = raw.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+      buffer = Buffer.from(cleaned, "base64");
+    }
+
+    const saved = await persistImageBuffer(req, buffer, mime);
+    res.json(saved);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Yükleme başarısız" });
+    const msg = e instanceof Error && e.message === "too_large" ? "Dosya çok büyük (max 5MB)" : "Yükleme başarısız";
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -897,7 +1229,11 @@ app.post("/api/profile-views", requireLogin, async (req, res) => {
 
 app.post("/api/users/me/photos", requireLogin, async (req, res) => {
   try {
-    const { url, order_index } = req.body as { url: string; order_index: number };
+    const { url, order_index, public_id } = req.body as {
+      url: string;
+      order_index: number;
+      public_id?: string | null;
+    };
     const uid = req.user!.id;
 
     const countRes = await pool.query("SELECT COUNT(*) FROM user_photos WHERE user_id = $1", [uid]);
@@ -906,8 +1242,8 @@ app.post("/api/users/me/photos", requireLogin, async (req, res) => {
     }
 
     const ins = await pool.query(
-      "INSERT INTO user_photos (user_id, url, order_index) VALUES ($1, $2, $3) RETURNING *",
-      [uid, url, order_index]
+      "INSERT INTO user_photos (user_id, url, public_id, order_index) VALUES ($1, $2, $3, $4) RETURNING *",
+      [uid, url, public_id ?? null, order_index]
     );
     res.json(ins.rows[0]);
   } catch (e) {
@@ -941,20 +1277,24 @@ app.delete("/api/users/me/photos/:photoId", requireLogin, async (req, res) => {
     ]);
     if (!exist.rows.length) return res.status(404).json({ error: "Fotoğraf bulunamadı" });
 
-    const photo = exist.rows[0];
+    const photo = exist.rows[0] as { url: string; public_id: string | null };
     await pool.query("DELETE FROM user_photos WHERE id = $1", [photoId]);
 
-    // Cloudinary delete
     try {
-      const url = photo.url;
-      // Extract public_id: https://res.cloudinary.com/.../v123/dambull/abc.jpg -> dambull/abc
-      const parts = url.split("/");
-      const last = parts[parts.length - 1]; // abc.jpg
-      const publicId = last.split(".")[0];
-      const folder = "dambull"; // folder name used in CloudinaryStorage
-      await cloudinary.uploader.destroy(`${folder}/${publicId}`);
+      const pid = photo.public_id;
+      if (pid?.startsWith("local/")) {
+        const filename = pid.slice("local/".length);
+        await fs.unlink(path.join(process.cwd(), "uploads", filename)).catch(() => undefined);
+      } else if (pid && isCloudinaryReady()) {
+        await cloudinary.uploader.destroy(pid);
+      } else if (photo.url?.includes("res.cloudinary.com") && isCloudinaryReady()) {
+        const parts = photo.url.split("/");
+        const last = parts[parts.length - 1];
+        const publicId = last.split(".")[0];
+        await cloudinary.uploader.destroy(`dambull/${publicId}`);
+      }
     } catch (err) {
-      console.warn("Cloudinary delete failed", err);
+      console.warn("Fotoğraf depolama silme başarısız", err);
     }
 
     res.json({ ok: true });
@@ -982,19 +1322,47 @@ app.patch("/api/users/me/photos/reorder", requireLogin, async (req, res) => {
   }
 });
 
+// Beklenmeyen Rejection ve İstisnaların sunucuyu düşürmesini önleme
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[server] Yakalanmamış Rejection (Unhandled Rejection):", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[server] Yakalanmamış İstisna (Uncaught Exception):", err);
+});
+
 async function start() {
-  await initSchema();
-  app.listen(API_PORT, () => {
-    console.log(`API http://localhost:${API_PORT}`);
+  try {
+    await initSchema();
+  } catch (err) {
+    console.error("[server] initSchema hatası (sunucu yine de başlatılıyor):", err);
+  }
+
+  const server = app.listen(API_PORT, "0.0.0.0", () => {
+    console.log(`API http://localhost:${API_PORT} (0.0.0.0:${API_PORT})`);
+    if (!isCloudinaryReady()) {
+      console.warn(
+        "[upload] Cloudinary env yok; fotoğraflar yerel /uploads klasörüne yazılacak."
+      );
+    }
     if (clientId && clientSecret) {
       console.log(
-        `Google OAuth — bu adresi Cloud Console → OAuth istemcisi → "Yetkilendirilmiş yönlendirme URI'leri"ne ekleyin:\n  ${CALLBACK_URL}`
+        `Google OAuth — Cloud Console'daki Yetkilendirilmiş Yönlendirme URI'leri:\n` +
+        `  Web / Localhost: http://localhost:${API_PORT}/api/auth/google/callback\n` +
+        `  Mobil: GOOGLE_CALLBACK_URL içinde public HTTPS tünel adresini ayarlayın; URI mobil girişte doğrulanır.`
       );
+    }
+  });
+
+  server.on("error", (err: any) => {
+    if (err?.code === "EADDRINUSE") {
+      console.error(`[server] Port ${API_PORT} zaten kullanımda! Başka bir sunucu işlemi açık kalmış olabilir.`);
+    } else {
+      console.error("[server] HTTP Sunucu Hatası:", err);
     }
   });
 }
 
 start().catch((e) => {
-  console.error(e);
-  process.exit(1);
+  console.error("[server] Başlatma hatası:", e);
 });

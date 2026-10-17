@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import * as ImagePicker from "expo-image-picker";
 import {
   Camera,
   ChevronDown,
@@ -35,7 +34,9 @@ import {
   Trophy,
   Globe,
 } from "lucide-react-native";
-import { apiGet, apiPatch, apiPost, apiDelete, API_BASE } from "../src/api";
+import { apiGet, apiPatch, apiPost, apiDelete } from "../src/api";
+import { clearToken } from "../src/auth";
+import { pickAndUploadPhoto } from "../src/upload";
 import type { SessionUser } from "../src/types";
 import { PersonalitySliders } from "../src/components/PersonalitySliders";
 import { VibeRadarChart } from "../src/components/VibeRadarChart";
@@ -229,6 +230,7 @@ export default function SettingsScreen() {
 
   const logout = async () => {
     try {
+      await clearToken();
       await apiPost("/api/auth/logout", {});
       router.replace("/login");
     } catch {
@@ -836,67 +838,40 @@ function PhotoManagerModal({
   }, [visible, user.id]);
 
   const uploadPhotoSlot = async (slotIdx: number, existingId?: string) => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("İzin", "Galeri izni gereklidir.");
-      return;
-    }
-
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (res.canceled || !res.assets || res.assets.length === 0) return;
-
     setLoading(true);
     try {
-      const uri = res.assets[0].uri;
-      const filename = uri.split("/").pop() || "photo.jpg";
-      const match = /\.(\w+)$/.exec(filename);
-      const mime = match ? `image/${match[1]}` : "image/jpeg";
-
-      const formData = new FormData();
-      formData.append("photo", {
-        uri,
-        name: filename,
-        type: mime,
-      } as any);
-
-      const upRes = await fetch(`${API_BASE}/api/upload`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-
-      if (!upRes.ok) throw new Error("Yükleme başarısız");
-      const { url } = (await upRes.json()) as { url: string };
+      const uploaded = await pickAndUploadPhoto();
+      if (!uploaded) return;
 
       if (slotIdx === 0) {
-        // Main avatar
-        const next = await apiPatch<SessionUser>("/api/users/me", { avatar_url: url });
+        const next = await apiPatch<SessionUser>("/api/users/me", {
+          avatar_url: uploaded.url,
+        });
         onUpdate(next);
-      } else {
-        if (existingId) {
-          await apiDelete(`/api/users/me/photos/${existingId}`);
-        }
-        await apiPost("/api/users/me/photos", { url, order_index: slotIdx });
-        void loadPhotos();
-        const me = await apiGet<SessionUser>("/api/auth/me");
-        onUpdate(me);
       }
-    } catch {
-      Alert.alert("Hata", "Fotoğraf yüklenemedi.");
+
+      if (existingId) {
+        await apiDelete(`/api/users/me/photos/${existingId}`);
+      }
+      await apiPost("/api/users/me/photos", {
+        url: uploaded.url,
+        public_id: uploaded.public_id,
+        order_index: slotIdx,
+      });
+      void loadPhotos();
+      const me = await apiGet<SessionUser>("/api/auth/me");
+      onUpdate(me);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Fotoğraf yüklenemedi.";
+      Alert.alert("Hata", message.includes("izin") ? message : "Fotoğraf yüklenemedi. Tekrar dene.");
     } finally {
       setLoading(false);
     }
   };
 
   const slots = Array.from({ length: 9 }).map((_, i) => {
-    if (i === 0) return { url: user.avatar_url, isMain: true, id: undefined };
     const p = photos.find((ph) => ph.order_index === i);
+    if (i === 0) return { url: p?.url || user.avatar_url, isMain: true, id: p?.id };
     return { url: p?.url, isMain: false, id: p?.id };
   });
 
@@ -906,7 +881,10 @@ function PhotoManagerModal({
         <View style={{ paddingBottom: Math.max(insets.bottom, 20) + 16 }}
           className="h-[80%] rounded-t-3xl border-t border-zinc-800 bg-zinc-950 p-5">
           <View className="flex-row items-center justify-between pb-4 border-b border-zinc-900">
-            <Text className="text-lg font-bold text-white">Profil Fotoğrafları (9 Slot)</Text>
+            <View>
+              <Text className="text-lg font-bold text-white">Fotoğrafların</Text>
+              <Text className="text-[11px] text-zinc-500 mt-0.5">İlk kare kapak fotoğrafın olur</Text>
+            </View>
             <Pressable onPress={onClose} className="h-8 w-8 items-center justify-center rounded-full bg-zinc-900">
               <X size={18} color="#a1a1aa" />
             </Pressable>

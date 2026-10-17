@@ -35,11 +35,12 @@ import {
   Map as MapIcon,
   Hand,
   Plus,
-  UserCheck,
+  ChevronLeft,
 } from "lucide-react-native";
 import { apiGet, apiPost } from "../../src/api";
 import type { SessionUser } from "../../src/types";
 import { formatRelativeTr } from "../../src/lib/time";
+import { openProfile } from "../../src/lib/openProfile";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const GRID_ITEM_WIDTH = (SCREEN_WIDTH - 32 - 12) / 2;
@@ -167,11 +168,10 @@ export default function MapScreen() {
   const [vibePosts, setVibePosts] = useState<VibePostItem[]>([]);
   const [loadingVibes, setLoadingVibes] = useState(false);
 
-  // Create Vibe Modal state (opened via "+" in Vibe List)
-  const [createVibeOpen, setCreateVibeOpen] = useState(false);
+  // Create / location picker live in the SAME sheet (nested RN Modals fail on iOS/Android)
+  const [vibeSheet, setVibeSheet] = useState<"list" | "create" | "location">("list");
   const [vibeTitle, setVibeTitle] = useState("");
   const [vibeLocation, setVibeLocation] = useState<string | null>(null);
-  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [submittingVibe, setSubmittingVibe] = useState(false);
 
@@ -341,8 +341,16 @@ export default function MapScreen() {
   };
 
   const handleOpenVibeList = () => {
+    setVibeSheet("list");
     setVibeListOpen(true);
     void loadVibes();
+  };
+
+  const openCreateVibe = () => {
+    setVibeTitle("");
+    setVibeLocation(null);
+    setPickerSearch("");
+    setVibeSheet("create");
   };
 
   // 5. Create Vibe Post handler (verified location enforced)
@@ -363,7 +371,7 @@ export default function MapScreen() {
       });
       setVibeTitle("");
       setVibeLocation(null);
-      setCreateVibeOpen(false);
+      setVibeSheet("list");
       void loadVibes();
       Alert.alert("Harika! 🎉", "Vibe etkinliğin başarıyla paylaşıldı!");
     } catch {
@@ -395,7 +403,7 @@ export default function MapScreen() {
             <Marker
               key={u.id}
               coordinate={{ latitude: u.lat, longitude: u.lng }}
-              onPress={() => router.push(`/profile/${u.id}` as any)}
+              onPress={() => openProfile(router, user?.id, u.id)}
             >
               <View className="items-center justify-center">
                 <View
@@ -511,7 +519,7 @@ export default function MapScreen() {
               const isWaved = wavedUsers[item.id];
               return (
                 <Pressable
-                  onPress={() => router.push(`/profile/${item.id}` as any)}
+                  onPress={() => openProfile(router, user?.id, item.id)}
                   className="rounded-3xl border border-zinc-800/80 bg-zinc-900 overflow-hidden relative active:scale-98"
                   style={{
                     width: GRID_ITEM_WIDTH,
@@ -876,301 +884,284 @@ export default function MapScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* 1. ETKİNLİKLER (VİBE) LİSTESİ MODALI */}
       <Modal
         visible={vibeListOpen}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setVibeListOpen(false)}
+        onRequestClose={() => {
+          if (vibeSheet !== "list") {
+            setVibeSheet("list");
+            return;
+          }
+          setVibeListOpen(false);
+        }}
       >
         <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1, backgroundColor: "#09090b" }}>
-          {/* Header */}
-          <View className="px-5 py-3.5 border-b border-zinc-900 bg-zinc-950 flex-row items-center justify-between">
-            <View className="flex-row items-center gap-2.5">
-              <Sparkles size={20} color="#6ee7b7" />
-              <Text className="text-xl font-black text-white">Etkinlikler (Vibe)</Text>
-            </View>
-            <View className="flex-row items-center gap-2">
-              {/* '+' (Yeni Ekle) Butonu */}
-              <Pressable
-                onPress={() => {
-                  setVibeTitle("");
-                  setVibeLocation(null);
-                  setCreateVibeOpen(true);
-                }}
-                className="flex-row items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 active:bg-emerald-700 shadow-lg"
-              >
-                <Plus size={16} color="#ffffff" strokeWidth={3} />
-                <Text className="text-xs font-black text-white">Yeni Ekle</Text>
-              </Pressable>
-
-              {/* Kapat Butonu */}
-              <Pressable
-                onPress={() => setVibeListOpen(false)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-zinc-900 active:bg-zinc-800"
-              >
-                <X size={18} color="#ffffff" />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Vibe Posts List */}
-          {loadingVibes ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#6ee7b7" />
-              <Text className="text-xs text-zinc-500 mt-2">Etkinlikler yükleniyor...</Text>
-            </View>
-          ) : (
-            <FlatList
-              data={vibePosts}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={{
-                padding: 16,
-                paddingBottom: 40,
-                gap: 12,
-              }}
-              ListEmptyComponent={
-                <View className="py-24 items-center justify-center px-6">
-                  <View className="h-16 w-16 rounded-full bg-zinc-900 items-center justify-center mb-3">
-                    <CalendarPlus size={28} color="#6ee7b7" />
+          {vibeSheet === "list" ? (
+            <>
+              <View className="px-5 py-3.5 border-b border-zinc-800/80 bg-zinc-950 flex-row items-center justify-between">
+                <View className="flex-row items-center gap-2.5">
+                  <View className="h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/30">
+                    <Sparkles size={18} color="#6ee7b7" />
                   </View>
-                  <Text className="text-white text-base font-black">Henüz Etkinlik Yok</Text>
-                  <Text className="text-zinc-500 text-xs text-center mt-1 max-w-xs">
-                    Çevrendekilerle buluşmak ve yeni anlar paylaşmak için ilk etkinliği sen oluştur!
-                  </Text>
+                  <View>
+                    <Text className="text-lg font-black text-white">Etkinlikler</Text>
+                    <Text className="text-[11px] text-zinc-500">Yakındaki vibe’lar</Text>
+                  </View>
+                </View>
+                <View className="flex-row items-center gap-2">
                   <Pressable
-                    onPress={() => {
-                      setVibeTitle("");
-                      setVibeLocation(null);
-                      setCreateVibeOpen(true);
-                    }}
-                    className="mt-5 rounded-2xl bg-emerald-600 px-6 py-3 active:bg-emerald-700"
+                    onPress={openCreateVibe}
+                    hitSlop={8}
+                    className="flex-row items-center gap-1.5 min-h-[44px] px-4 rounded-full bg-emerald-600 active:bg-emerald-700"
                   >
-                    <Text className="text-white font-bold text-sm">İlk Etkinliği Paylaş 🚀</Text>
+                    <Plus size={16} color="#ffffff" strokeWidth={3} />
+                    <Text className="text-xs font-black text-white">Yeni Ekle</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setVibeListOpen(false)}
+                    className="h-11 w-11 items-center justify-center rounded-full bg-zinc-900 active:bg-zinc-800"
+                  >
+                    <X size={18} color="#ffffff" />
                   </Pressable>
                 </View>
-              }
-              renderItem={({ item }) => (
-                <View className="rounded-3xl border border-zinc-800/80 bg-zinc-900/70 p-4">
-                  {/* Author Header */}
-                  <View className="flex-row items-center justify-between mb-3">
-                    <Pressable
-                      onPress={() => {
-                        setVibeListOpen(false);
-                        router.push(`/profile/${item.user_id}` as any);
-                      }}
-                      className="flex-row items-center gap-3 flex-1"
-                    >
-                      {item.author_avatar ? (
-                        <Image
-                          source={{ uri: item.author_avatar }}
-                          className="h-10 w-10 rounded-full bg-zinc-800"
-                        />
-                      ) : (
-                        <View className="h-10 w-10 items-center justify-center rounded-full bg-zinc-800">
-                          <Text className="text-sm font-bold text-white">
-                            {(item.author_name || "?").slice(0, 1)}
-                          </Text>
-                        </View>
-                      )}
-                      <View className="flex-1">
-                        <Text className="text-sm font-bold text-white">
-                          {item.author_name}
-                        </Text>
-                        <Text className="text-[11px] text-zinc-500">
-                          {formatRelativeTr(item.created_at)}
-                        </Text>
-                      </View>
-                    </Pressable>
-
-                    {item.location_tag && (
-                      <View className="flex-row items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1">
-                        <MapPin size={12} color="#6ee7b7" />
-                        <Text className="text-[11px] font-bold text-emerald-300">
-                          {item.location_tag}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Vibe Content */}
-                  <Text className="text-base font-bold text-white leading-relaxed">
-                    {item.title}
-                  </Text>
-                </View>
-              )}
-            />
-          )}
-        </SafeAreaView>
-      </Modal>
-
-      {/* 2. YENİ VİBE OLUŞTUR MODALI (ZORUNLU ONAYLI LOKASYON SEÇİMİ) */}
-      <Modal
-        visible={createVibeOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setCreateVibeOpen(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1 }}
-        >
-          <Pressable
-            onPress={() => setCreateVibeOpen(false)}
-            className="flex-1 bg-black/75 justify-end"
-          >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
-              className="rounded-t-3xl border-t border-zinc-800 bg-zinc-950 p-6 pb-12"
-            >
-              <View className="flex-row justify-between items-center mb-5">
-                <View className="flex-row items-center gap-2">
-                  <Sparkles size={20} color="#6ee7b7" />
-                  <Text className="text-xl font-black text-white">Yeni Vibe Paylaş</Text>
-                </View>
-                <Pressable
-                  onPress={() => setCreateVibeOpen(false)}
-                  className="h-8 w-8 items-center justify-center rounded-full bg-zinc-900"
-                >
-                  <X size={18} color="#a1a1aa" />
-                </Pressable>
               </View>
 
-              {/* Başlık Input */}
-              <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                Başlık
-              </Text>
-              <TextInput
-                value={vibeTitle}
-                onChangeText={setVibeTitle}
-                placeholder="Aklından geçen vibe nedir? (Örn: Sahilde kahve & sohbet)"
-                placeholderTextColor="#71717a"
-                className="h-12 rounded-xl bg-zinc-900 px-4 text-white mb-4 border border-zinc-800 text-sm"
-              />
-
-              {/* Etkinlik Yeri: Kesinlikle serbest metin değil, onaylı listeden seçim! */}
-              <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                Etkinlik Yeri (Harita Motorundan Seçiniz)
-              </Text>
-              <Pressable
-                onPress={() => {
-                  setPickerSearch("");
-                  setLocationPickerOpen(true);
-                }}
-                className={`flex-row items-center justify-between h-13 rounded-xl bg-zinc-900 px-4 mb-6 border ${
-                  vibeLocation ? "border-emerald-500/60" : "border-zinc-800"
-                }`}
-              >
-                <View className="flex-row items-center gap-2.5 flex-1 pr-2">
-                  <MapPin size={18} color={vibeLocation ? "#6ee7b7" : "#71717a"} />
-                  <Text
-                    numberOfLines={1}
-                    className={`text-sm ${
-                      vibeLocation ? "text-white font-bold" : "text-zinc-500 italic"
-                    }`}
-                  >
-                    {vibeLocation || "Lokasyon seçmek için dokunun..."}
-                  </Text>
+              {loadingVibes ? (
+                <View className="flex-1 items-center justify-center">
+                  <ActivityIndicator size="large" color="#6ee7b7" />
+                  <Text className="text-xs text-zinc-500 mt-2">Etkinlikler yükleniyor...</Text>
                 </View>
-                {vibeLocation ? (
-                  <View className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 border border-emerald-500/40">
-                    <Text className="text-[10px] font-bold text-emerald-300">Seçildi</Text>
-                  </View>
-                ) : (
-                  <ChevronRight size={18} color="#71717a" />
-                )}
-              </Pressable>
+              ) : (
+                <FlatList
+                  data={vibePosts}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={{
+                    padding: 16,
+                    paddingBottom: 40,
+                    gap: 12,
+                  }}
+                  ListEmptyComponent={
+                    <View className="py-24 items-center justify-center px-6">
+                      <View className="h-16 w-16 rounded-full bg-zinc-900 items-center justify-center mb-3">
+                        <CalendarPlus size={28} color="#6ee7b7" />
+                      </View>
+                      <Text className="text-white text-base font-black">Henüz Etkinlik Yok</Text>
+                      <Text className="text-zinc-500 text-xs text-center mt-1 max-w-xs">
+                        Çevrendekilerle buluşmak için ilk etkinliği sen oluştur.
+                      </Text>
+                      <Pressable
+                        onPress={openCreateVibe}
+                        className="mt-5 min-h-[48px] items-center justify-center rounded-2xl bg-emerald-600 px-6 py-3 active:bg-emerald-700"
+                      >
+                        <Text className="text-white font-bold text-sm">İlk Etkinliği Paylaş</Text>
+                      </Pressable>
+                    </View>
+                  }
+                  renderItem={({ item }) => {
+                    const isMine = Boolean(user?.id && item.user_id === user.id);
+                    return (
+                      <View className="rounded-3xl border border-zinc-800/80 bg-zinc-900/80 p-4">
+                        <View className="flex-row items-center justify-between mb-3">
+                          <Pressable
+                            onPress={() => {
+                              setVibeListOpen(false);
+                              openProfile(router, user?.id, item.user_id);
+                            }}
+                            className="flex-row items-center gap-3 flex-1 pr-2 min-h-[44px]"
+                          >
+                            {item.author_avatar ? (
+                              <Image
+                                source={{ uri: item.author_avatar }}
+                                className="h-11 w-11 rounded-full bg-zinc-800"
+                              />
+                            ) : (
+                              <View className="h-11 w-11 items-center justify-center rounded-full bg-zinc-800">
+                                <Text className="text-sm font-bold text-white">
+                                  {(item.author_name || "?").slice(0, 1)}
+                                </Text>
+                              </View>
+                            )}
+                            <View className="flex-1">
+                              <View className="flex-row items-center gap-2">
+                                <Text className="text-sm font-bold text-white">
+                                  {item.author_name}
+                                </Text>
+                                {isMine ? (
+                                  <View className="rounded-full bg-violet-500/20 border border-violet-400/40 px-2 py-0.5">
+                                    <Text className="text-[10px] font-black text-violet-200">Sen</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                              <Text className="text-[11px] text-zinc-500">
+                                {isMine ? "Profilini düzenle" : formatRelativeTr(item.created_at)}
+                              </Text>
+                            </View>
+                          </Pressable>
 
-              {/* Paylaş Butonu */}
-              <Pressable
-                onPress={handleCreateVibe}
-                disabled={submittingVibe || !vibeTitle.trim() || !vibeLocation}
-                className={`h-14 items-center justify-center rounded-2xl ${
-                  vibeTitle.trim() && vibeLocation
-                    ? "bg-emerald-600 active:bg-emerald-700"
-                    : "bg-zinc-800 opacity-60"
-                }`}
-              >
-                {submittingVibe ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text className="text-base font-black text-white">Etkinliği Paylaş</Text>
-                )}
-              </Pressable>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* 3. VİBE ETKİNLİK YERİ SEÇİCİ MODALI (GERÇEK LOKASYON LİSTESİ) */}
-      <Modal
-        visible={locationPickerOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setLocationPickerOpen(false)}
-      >
-        <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1, backgroundColor: "#09090b" }}>
-          <View className="flex-row items-center justify-between px-5 pt-3 pb-3 border-b border-zinc-900 bg-zinc-950">
-            <Text className="text-lg font-black text-white">Etkinlik Yeri Seç</Text>
-            <Pressable
-              onPress={() => setLocationPickerOpen(false)}
-              className="h-9 w-9 items-center justify-center rounded-full bg-zinc-900"
-            >
-              <X size={18} color="#ffffff" />
-            </Pressable>
-          </View>
-
-          {/* Search bar inside location picker */}
-          <View className="p-4 bg-zinc-950 border-b border-zinc-900">
-            <View className="flex-row items-center rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 h-11 gap-2.5">
-              <Search size={16} color="#71717a" />
-              <TextInput
-                value={pickerSearch}
-                onChangeText={setPickerSearch}
-                placeholder="Semt veya şehir ara..."
-                placeholderTextColor="#71717a"
-                className="flex-1 text-white text-sm"
-              />
-              {pickerSearch.length > 0 && (
-                <Pressable onPress={() => setPickerSearch("")}>
-                  <X size={16} color="#71717a" />
-                </Pressable>
+                          {item.location_tag ? (
+                            <View className="flex-row items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 max-w-[42%]">
+                              <MapPin size={12} color="#6ee7b7" />
+                              <Text numberOfLines={1} className="text-[11px] font-bold text-emerald-300">
+                                {item.location_tag}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text className="text-base font-bold text-white leading-relaxed">
+                          {item.title}
+                        </Text>
+                      </View>
+                    );
+                  }}
+                />
               )}
-            </View>
-          </View>
+            </>
+          ) : null}
 
-          {/* Location results list */}
-          <FlatList
-            data={filteredPickerLocations}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={{ padding: 16, gap: 8 }}
-            renderItem={({ item }) => {
-              const formattedLoc = `${item.title}, ${item.subtitle.split(",")[0]}`;
-              const isSelected = vibeLocation === formattedLoc;
-              return (
+          {vibeSheet === "create" ? (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={{ flex: 1 }}
+            >
+              <View className="px-5 py-3.5 border-b border-zinc-800/80 bg-zinc-950 flex-row items-center justify-between">
+                <Pressable
+                  onPress={() => setVibeSheet("list")}
+                  className="h-11 w-11 items-center justify-center rounded-full bg-zinc-900"
+                >
+                  <ChevronLeft size={22} color="#ffffff" />
+                </Pressable>
+                <Text className="text-lg font-black text-white">Yeni Vibe</Text>
+                <Pressable
+                  onPress={() => setVibeListOpen(false)}
+                  className="h-11 w-11 items-center justify-center rounded-full bg-zinc-900"
+                >
+                  <X size={18} color="#ffffff" />
+                </Pressable>
+              </View>
+              <View className="px-5 pt-6">
+                <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                  Başlık
+                </Text>
+                <TextInput
+                  value={vibeTitle}
+                  onChangeText={setVibeTitle}
+                  placeholder="Aklından geçen vibe nedir? (Örn: Sahilde kahve)"
+                  placeholderTextColor="#71717a"
+                  className="min-h-[48px] rounded-xl bg-zinc-900 px-4 text-white mb-4 border border-zinc-800 text-sm"
+                />
+                <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                  Etkinlik yeri
+                </Text>
                 <Pressable
                   onPress={() => {
-                    setVibeLocation(formattedLoc);
-                    setLocationPickerOpen(false);
+                    setPickerSearch("");
+                    setVibeSheet("location");
                   }}
-                  className={`flex-row items-center justify-between p-3.5 rounded-2xl border ${
-                    isSelected
-                      ? "border-emerald-500 bg-emerald-950/20"
-                      : "border-zinc-800 bg-zinc-900/70 active:bg-zinc-800"
+                  className={`flex-row items-center justify-between min-h-[52px] rounded-xl bg-zinc-900 px-4 mb-6 border ${
+                    vibeLocation ? "border-emerald-500/60" : "border-zinc-800"
                   }`}
                 >
-                  <View className="flex-row items-center gap-3">
-                    <MapPin size={18} color={isSelected ? "#6ee7b7" : "#a1a1aa"} />
-                    <View>
-                      <Text className="text-sm font-bold text-white">{item.title}</Text>
-                      <Text className="text-xs text-zinc-400">{item.subtitle}</Text>
-                    </View>
+                  <View className="flex-row items-center gap-2.5 flex-1 pr-2">
+                    <MapPin size={18} color={vibeLocation ? "#6ee7b7" : "#71717a"} />
+                    <Text
+                      numberOfLines={1}
+                      className={`text-sm ${
+                        vibeLocation ? "text-white font-bold" : "text-zinc-500 italic"
+                      }`}
+                    >
+                      {vibeLocation || "Lokasyon seçmek için dokunun..."}
+                    </Text>
                   </View>
-                  {isSelected && <Check size={18} color="#6ee7b7" strokeWidth={2.5} />}
+                  {vibeLocation ? (
+                    <View className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 border border-emerald-500/40">
+                      <Text className="text-[10px] font-bold text-emerald-300">Seçildi</Text>
+                    </View>
+                  ) : (
+                    <ChevronRight size={18} color="#71717a" />
+                  )}
                 </Pressable>
-              );
-            }}
-          />
+                <Pressable
+                  onPress={handleCreateVibe}
+                  disabled={submittingVibe || !vibeTitle.trim() || !vibeLocation}
+                  className={`h-14 items-center justify-center rounded-2xl ${
+                    vibeTitle.trim() && vibeLocation
+                      ? "bg-emerald-600 active:bg-emerald-700"
+                      : "bg-zinc-800 opacity-60"
+                  }`}
+                >
+                  {submittingVibe ? (
+                    <ActivityIndicator color="#ffffff" />
+                  ) : (
+                    <Text className="text-base font-black text-white">Etkinliği Paylaş</Text>
+                  )}
+                </Pressable>
+              </View>
+            </KeyboardAvoidingView>
+          ) : null}
+
+          {vibeSheet === "location" ? (
+            <>
+              <View className="flex-row items-center justify-between px-5 py-3 border-b border-zinc-800/80 bg-zinc-950">
+                <Pressable
+                  onPress={() => setVibeSheet("create")}
+                  className="h-11 w-11 items-center justify-center rounded-full bg-zinc-900"
+                >
+                  <ChevronLeft size={22} color="#ffffff" />
+                </Pressable>
+                <Text className="text-lg font-black text-white">Etkinlik Yeri Seç</Text>
+                <View className="w-11" />
+              </View>
+              <View className="p-4 bg-zinc-950 border-b border-zinc-900">
+                <View className="flex-row items-center rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 min-h-[44px] gap-2.5">
+                  <Search size={16} color="#71717a" />
+                  <TextInput
+                    value={pickerSearch}
+                    onChangeText={setPickerSearch}
+                    placeholder="Semt veya şehir ara..."
+                    placeholderTextColor="#71717a"
+                    className="flex-1 text-white text-sm"
+                  />
+                  {pickerSearch.length > 0 ? (
+                    <Pressable onPress={() => setPickerSearch("")} hitSlop={8}>
+                      <X size={16} color="#71717a" />
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+              <FlatList
+                data={filteredPickerLocations}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={{ padding: 16, gap: 8 }}
+                renderItem={({ item }) => {
+                  const formattedLoc = `${item.title}, ${item.subtitle.split(",")[0]}`;
+                  const isSelected = vibeLocation === formattedLoc;
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        setVibeLocation(formattedLoc);
+                        setVibeSheet("create");
+                      }}
+                      className={`flex-row items-center justify-between min-h-[56px] p-3.5 rounded-2xl border ${
+                        isSelected
+                          ? "border-emerald-500 bg-emerald-950/20"
+                          : "border-zinc-800 bg-zinc-900/70 active:bg-zinc-800"
+                      }`}
+                    >
+                      <View className="flex-row items-center gap-3">
+                        <MapPin size={18} color={isSelected ? "#6ee7b7" : "#a1a1aa"} />
+                        <View>
+                          <Text className="text-sm font-bold text-white">{item.title}</Text>
+                          <Text className="text-xs text-zinc-400">{item.subtitle}</Text>
+                        </View>
+                      </View>
+                      {isSelected ? <Check size={18} color="#6ee7b7" strokeWidth={2.5} /> : null}
+                    </Pressable>
+                  );
+                }}
+              />
+            </>
+          ) : null}
         </SafeAreaView>
       </Modal>
     </View>

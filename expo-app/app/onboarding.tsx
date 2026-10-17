@@ -13,7 +13,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, MapPin, ChevronDown, Check } from "lucide-react-native";
-import { apiPatch, API_BASE } from "../src/api";
+import { apiPatch, apiPost } from "../src/api";
+import { uploadImageAsset } from "../src/upload";
+import type { ImagePickerAsset } from "expo-image-picker";
 import { PersonalitySliders } from "../src/components/PersonalitySliders";
 
 function ageToBirthDate(age: number): string {
@@ -34,6 +36,7 @@ export default function OnboardingScreen() {
   const [prefGender, setPrefGender] = useState<"female" | "male" | "everyone">("female");
   const [bio, setBio] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [pickedAsset, setPickedAsset] = useState<ImagePickerAsset | null>(null);
 
   const [personality, setPersonality] = useState({
     personality_humor: 50,
@@ -57,10 +60,13 @@ export default function OnboardingScreen() {
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.75,
+      base64: true,
+      exif: false,
     });
     if (!res.canceled && res.assets && res.assets.length > 0) {
       setImageUri(res.assets[0].uri);
+      setPickedAsset(res.assets[0]);
     }
   };
 
@@ -81,29 +87,13 @@ export default function OnboardingScreen() {
 
     setLoading(true);
     try {
-      // 1. Upload photo
-      const filename = imageUri.split("/").pop() || "avatar.jpg";
-      const match = /\.(\w+)$/.exec(filename);
-      const mime = match ? `image/${match[1]}` : "image/jpeg";
-
-      const formData = new FormData();
-      formData.append("photo", {
-        uri: imageUri,
-        name: filename,
-        type: mime,
-      } as any);
-
-      const upRes = await fetch(`${API_BASE}/api/upload`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-
-      if (!upRes.ok) {
+      const uploaded = pickedAsset
+        ? await uploadImageAsset(pickedAsset)
+        : null;
+      if (!uploaded?.url) {
         throw new Error("Fotoğraf yükleme başarısız oldu.");
       }
-
-      const { url: avatar_url } = (await upRes.json()) as { url: string };
+      const avatar_url = uploaded.url;
 
       // 2. Patch user profile
       await apiPatch("/api/users/me", {
@@ -119,6 +109,11 @@ export default function OnboardingScreen() {
         tags: [],
         ...personality,
       });
+      await apiPost("/api/users/me/photos", {
+        url: avatar_url,
+        public_id: uploaded.public_id,
+        order_index: 0,
+      }).catch(() => undefined);
 
       router.replace("/(tabs)/map");
     } catch (e) {

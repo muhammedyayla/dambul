@@ -1,12 +1,13 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { getToken } from "./auth";
 
 function getDefaultApiBase(): string {
   const debuggerHost =
     Constants.expoConfig?.hostUri ||
     (Constants as any).expoGoConfig?.debuggerHost ||
     (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
-  const ip = debuggerHost ? debuggerHost.split(":")[0] : "10.0.3.105";
+  const ip = debuggerHost ? debuggerHost.split(":")[0] : "10.0.3.107";
 
   if (Platform.OS === "web") {
     return "http://localhost:3001";
@@ -22,6 +23,13 @@ export function setApiBase(url: string) {
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
+
+  // Attach JWT token for mobile auth
+  const token = await getToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }

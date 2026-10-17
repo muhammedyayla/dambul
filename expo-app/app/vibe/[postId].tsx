@@ -11,6 +11,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ChevronLeft, MapPin } from "lucide-react-native";
 import { apiGet, apiPost } from "../../src/api";
+import type { SessionUser } from "../../src/types";
+import { openProfile } from "../../src/lib/openProfile";
 
 type PostDetail = {
   id: string;
@@ -28,14 +30,19 @@ export default function VibePostDetailScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const router = useRouter();
   const [post, setPost] = useState<PostDetail | null>(null);
+  const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!postId) return;
     void (async () => {
       try {
-        const p = await apiGet<PostDetail>(`/api/vibe/posts/${postId}`);
+        const [p, me] = await Promise.all([
+          apiGet<PostDetail>(`/api/vibe/posts/${postId}`),
+          apiGet<SessionUser>("/api/auth/me"),
+        ]);
         setPost(p);
+        setMeId(me.id);
       } catch {
         Alert.alert("Hata", "Gönderi bulunamadı.");
       } finally {
@@ -65,6 +72,7 @@ export default function VibePostDetailScreen() {
   }
 
   const tags = Array.isArray(post.author_tags) ? (post.author_tags as string[]) : [];
+  const isMine = Boolean(meId && post.user_id === meId);
 
   return (
     <SafeAreaView className="flex-1 bg-zinc-950 px-5">
@@ -91,7 +99,7 @@ export default function VibePostDetailScreen() {
 
       {/* Author Card */}
       <Pressable
-        onPress={() => router.push(`/profile/${post.user_id}` as any)}
+        onPress={() => openProfile(router, meId, post.user_id)}
         className="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5 active:bg-zinc-900"
       >
         <View className="flex-row items-center gap-4">
@@ -110,7 +118,9 @@ export default function VibePostDetailScreen() {
           <View className="flex-1">
             <Text className="text-lg font-bold text-white">{post.author_name}</Text>
             <Text className="text-sm text-zinc-400 mt-0.5">
-              {post.author_city || "Konum belirtilmedi"}
+              {isMine
+                ? "Profilini düzenlemek için dokun"
+                : post.author_city || "Konum belirtilmedi"}
             </Text>
           </View>
         </View>
@@ -126,12 +136,21 @@ export default function VibePostDetailScreen() {
         ) : null}
       </Pressable>
 
-      <Pressable
-        onPress={sendMsg}
-        className="mt-8 h-14 w-full items-center justify-center rounded-2xl bg-violet-600 active:bg-violet-700 shadow-xl"
-      >
-        <Text className="text-base font-bold text-white">Mesaj Gönder</Text>
-      </Pressable>
+      {isMine ? (
+        <Pressable
+          onPress={() => router.push("/settings" as any)}
+          className="mt-8 h-14 w-full items-center justify-center rounded-2xl bg-violet-600 active:bg-violet-700 shadow-xl"
+        >
+          <Text className="text-base font-bold text-white">Profilimi Düzenle</Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={sendMsg}
+          className="mt-8 h-14 w-full items-center justify-center rounded-2xl bg-violet-600 active:bg-violet-700 shadow-xl"
+        >
+          <Text className="text-base font-bold text-white">Mesaj Gönder</Text>
+        </Pressable>
+      )}
     </SafeAreaView>
   );
 }

@@ -1,8 +1,12 @@
 import React from "react";
 import { Tabs } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Globe, Layers, MessageCircle, Bell } from "lucide-react-native";
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 8);
+
   return (
     <Tabs
       screenOptions={{
@@ -13,9 +17,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: "#09090b",
           borderTopColor: "#27272a",
-          height: 60,
+          height: 52 + bottomPad,
           paddingTop: 6,
-          paddingBottom: 6,
+          paddingBottom: bottomPad,
         },
       }}
     >
