@@ -206,6 +206,8 @@ export async function initSchema(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_photos JSONB DEFAULT '[]'::jsonb`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS abstract_qa JSONB DEFAULT '[]'::jsonb`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
   ];
   for (const sql of migrations) {
     try {
