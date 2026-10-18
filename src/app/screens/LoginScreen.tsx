@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { API_BASE } from "../api";
 
 export function LoginScreen() {
   return (
@@ -16,13 +17,13 @@ export function LoginScreen() {
         </p>
         <div className="flex flex-col gap-3">
           <a
-            href="http://localhost:3001/api/auth/google"
+            href={`${API_BASE}/api/auth/google`}
             className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-white text-base font-semibold text-zinc-900 transition hover:bg-zinc-100"
           >
             Google ile Giriş Yap
           </a>
           <a
-            href="http://localhost:3001/api/auth/google"
+            href={`${API_BASE}/api/auth/google`}
             className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-zinc-600 bg-transparent text-sm font-semibold text-zinc-200 transition hover:bg-zinc-800"
           >
             Google ile Kayıt Ol

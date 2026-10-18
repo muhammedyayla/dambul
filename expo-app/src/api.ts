@@ -3,15 +3,21 @@ import Constants from "expo-constants";
 import { getToken } from "./auth";
 
 function getDefaultApiBase(): string {
+  const configuredApiBase = process.env.EXPO_PUBLIC_API_URL;
+  if (configuredApiBase) {
+    return configuredApiBase.replace(/\/+$/, "");
+  }
+
+  if (Platform.OS === "web") {
+    return __DEV__ ? "http://localhost:3001" : "";
+  }
+
   const debuggerHost =
     Constants.expoConfig?.hostUri ||
     (Constants as any).expoGoConfig?.debuggerHost ||
     (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
   const ip = debuggerHost ? debuggerHost.split(":")[0] : "10.0.3.107";
 
-  if (Platform.OS === "web") {
-    return "http://localhost:3001";
-  }
   return `http://${ip}:3001`;
 }
 

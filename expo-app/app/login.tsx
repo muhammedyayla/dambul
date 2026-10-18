@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Pressable, ActivityIndicator, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, Alert, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -36,6 +36,14 @@ export default function LoginScreen() {
   const handleGoogleAuth = async () => {
     setLoading(true);
     try {
+      if (Platform.OS === "web") {
+        if (typeof window === "undefined") {
+          throw new Error("Web OAuth yalnızca tarayıcıda başlatılabilir.");
+        }
+        window.location.assign(`${API_BASE}/api/auth/google`);
+        return;
+      }
+
       // Expo'nun oluşturduğu redirect URI (Expo Go'da exp://... veya dambul://auth)
       const redirectUrl = Linking.createURL("auth");
 

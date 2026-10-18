@@ -60,30 +60,7 @@ pool.on("error", (err) => {
   console.error("[db] Beklenmeyen veritabanı bağlantı hatası (idle client error):", err?.message || err);
 });
 
-/** Eski projelerde users.id integer olabiliyor; UUID şemasıyla uyumsuz. Geliştirme DB’sinde tabloları sıfırlar. */
-async function resetSchemaIfUserIdNotUuid(): Promise<void> {
-  const { rows } = await pool.query<{ udt_name: string }>(
-    `SELECT c.udt_name::text AS udt_name
-     FROM information_schema.columns c
-     WHERE c.table_schema = 'public' AND c.table_name = 'users' AND c.column_name = 'id'`
-  );
-  if (rows.length === 0) return;
-  if (rows[0].udt_name === "uuid") return;
-  console.warn(
-    `[db] users.id tipi "${rows[0].udt_name}" (uuid değil). Tablolar UUID şeması için yeniden oluşturulacak; mevcut veriler silinir.`
-  );
-  await pool.query(`
-    DROP TABLE IF EXISTS messages CASCADE;
-    DROP TABLE IF EXISTS chat_threads CASCADE;
-    DROP TABLE IF EXISTS vibe_posts CASCADE;
-    DROP TABLE IF EXISTS notifications CASCADE;
-    DROP TABLE IF EXISTS likes CASCADE;
-    DROP TABLE IF EXISTS users CASCADE;
-  `);
-}
-
 export async function initSchema(): Promise<void> {
-  await resetSchemaIfUserIdNotUuid();
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

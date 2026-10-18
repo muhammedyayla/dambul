@@ -32,7 +32,11 @@ function verifyToken(token: string): string | null {
   }
 }
 
-const FRONTEND_ORIGIN = "http://localhost:5173";
+const FRONTEND_ORIGIN =
+  process.env.FRONTEND_ORIGIN ||
+  (process.env.NODE_ENV === "production"
+    ? "https://dambul.onrender.com"
+    : "http://localhost:5173");
 const CLOUDINARY_CLOUD =
   process.env.cloudinary_cloud_name || process.env.CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_KEY = process.env.cloudinary_api_key || process.env.CLOUDINARY_API_KEY;
@@ -81,13 +85,26 @@ function isLoopbackUrl(url: string): boolean {
 
 function getGoogleCallbackUrl(req?: Request, mobile = false): string {
   const configuredCallbackUrl = process.env.GOOGLE_CALLBACK_URL;
-  if (configuredCallbackUrl && !(mobile && isLoopbackUrl(configuredCallbackUrl))) {
+  if (mobile) {
+    return configuredCallbackUrl || "https://dambul.onrender.com/api/auth/google/callback";
+  }
+  if (req && isLoopbackUrl(`${req.protocol}://${req.hostname}`)) {
+    return `http://localhost:${API_PORT}/api/auth/google/callback`;
+  }
+  if (configuredCallbackUrl) {
     return configuredCallbackUrl;
   }
   if (req) {
     return `${publicBaseUrl(req)}/api/auth/google/callback`;
   }
   return configuredCallbackUrl || CALLBACK_URL;
+}
+
+function getFrontendOrigin(req?: Request): string {
+  if (req && isLoopbackUrl(`${req.protocol}://${req.hostname}`)) {
+    return "http://localhost:5173";
+  }
+  return FRONTEND_ORIGIN;
 }
 
 async function persistImageBuffer(
@@ -320,7 +337,7 @@ app.use(
       maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       sameSite: "lax",
-      secure: false,
+      secure: process.env.NODE_ENV === "production",
     },
   })
 );
@@ -354,6 +371,9 @@ function requireLogin(req: Request, res: Response, next: NextFunction) {
 }
 
 app.post("/api/auth/dev-login", async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({ error: "Test girişi canlı ortamda kapalıdır" });
+  }
   try {
     let r = await pool.query("SELECT * FROM users ORDER BY created_at ASC LIMIT 1");
 
@@ -438,6 +458,7 @@ app.get("/api/auth/google", (req, res, next) => {
   const statePayload = JSON.stringify({
     mobileUri: mobileRedirectUri,
     callbackURL,
+    frontendOrigin: getFrontendOrigin(req),
   });
   const state = Buffer.from(statePayload).toString("base64url");
 
@@ -452,6 +473,7 @@ app.get(
   "/api/auth/google/callback",
   (req, res, next) => {
     let callbackURL = getGoogleCallbackUrl(req);
+    let frontendOrigin = getFrontendOrigin(req);
     let mobileUri: string | null = null;
     const stateRaw = req.query.state as string | undefined;
 
@@ -460,6 +482,7 @@ app.get(
         const parsed = JSON.parse(Buffer.from(stateRaw, "base64url").toString("utf8"));
         if (parsed.callbackURL) callbackURL = parsed.callbackURL;
         if (parsed.mobileUri) mobileUri = parsed.mobileUri;
+        if (parsed.frontendOrigin) frontendOrigin = parsed.frontendOrigin;
       } catch {
         try {
           mobileUri = decodeURIComponent(stateRaw);
@@ -468,10 +491,11 @@ app.get(
     }
 
     (req as any)._mobileRedirectUri = mobileUri;
+    (req as any)._frontendOrigin = frontendOrigin;
 
     passport.authenticate("google", {
       callbackURL,
-      failureRedirect: `${FRONTEND_ORIGIN}/login?error=auth_failed`,
+      failureRedirect: `${frontendOrigin}/login?error=auth_failed`,
       session: true,
     } as any)(req, res, next);
   },
@@ -479,12 +503,13 @@ app.get(
     const user = req.user as DbUser;
     const token = signToken(user.id);
     const mobileUri = (req as any)._mobileRedirectUri;
+    const frontendOrigin = (req as any)._frontendOrigin as string;
 
     if (mobileUri) {
       const separator = mobileUri.includes("?") ? "&" : "?";
       return res.redirect(`${mobileUri}${separator}token=${token}`);
     }
-    res.redirect(`${FRONTEND_ORIGIN}/map`);
+    res.redirect(`${frontendOrigin}/map`);
   }
 );
 
@@ -1329,6 +1354,27 @@ process.on("unhandledRejection", (reason, promise) => {
 
 process.on("uncaughtException", (err) => {
   console.error("[server] Yakalanmamış İstisna (Uncaught Exception):", err);
+});
+
+const distPath = path.join(process.cwd(), "dist");
+app.use(express.static(distPath));
+
+app.get("/{*path}", (req, res, next) => {
+  if (
+    req.path === "/api" ||
+    req.path.startsWith("/api/") ||
+    req.path === "/uploads" ||
+    req.path.startsWith("/uploads/")
+  ) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, "index.html"), (err) => {
+    if (err && "code" in err && err.code === "ENOENT" && !res.headersSent) {
+      res.status(200).json({ status: "ok", message: "Dambul API aktif (Web build bulunamadı)" });
+    } else if (err) {
+      next(err);
+    }
+  });
 });
 
 async function start() {

@@ -15,7 +15,7 @@
     "lucide-react-native": "^1.41.0",
     "nativewind": "^4.2.6",
     "react": "19.2.3",
-    "react-dom": "^19.2.8",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-maps": "1.27.2",
     "react-native-reanimated": "4.5.1",
@@ -35,7 +35,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web --port 5173",
+    "build:web": "expo export --platform web --output-dir ../dist"
   },
   "private": true
 }
