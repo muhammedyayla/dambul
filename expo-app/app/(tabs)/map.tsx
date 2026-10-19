@@ -77,6 +77,65 @@ type LocationOption = {
   delta: number;
 };
 
+type NominatimResult = {
+  place_id: number;
+  name?: string;
+  display_name: string;
+  lat: string;
+  lon: string;
+  type: string;
+  addresstype?: string;
+  address?: {
+    country_code?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    municipality?: string;
+    suburb?: string;
+    neighbourhood?: string;
+    city_district?: string;
+    county?: string;
+  };
+};
+
+async function searchNominatimLocations(
+  query: string,
+  signal: AbortSignal
+): Promise<LocationOption[]> {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=10&accept-language=tr`,
+    { headers: { Accept: "application/json" }, signal }
+  );
+  if (!response.ok) {
+    throw new Error(`Konum araması başarısız oldu (${response.status}).`);
+  }
+
+  const results = (await response.json()) as NominatimResult[];
+  return results.flatMap((result) => {
+    const lat = Number(result.lat);
+    const lng = Number(result.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+    const address = result.address ?? {};
+    const isCity =
+      ["city", "town", "municipality", "village"].includes(result.type) ||
+      ["city", "town", "municipality", "village"].includes(result.addresstype ?? "");
+    const isWorld = Boolean(address.country_code && address.country_code !== "tr");
+    const title = result.name?.trim() || result.display_name.split(",")[0];
+    const subtitle = result.display_name.split(",").slice(1, 4).join(",").trim();
+
+    return [{
+      id: `nominatim-${result.place_id}`,
+      title,
+      subtitle,
+      category: isWorld ? "world" : isCity ? "city" : "district",
+      lat,
+      lng,
+      delta: isCity ? 0.10 : 0.03,
+    } satisfies LocationOption];
+  });
+}
+
 // PITCH DARK MINIMAL MAP STYLE (Hides roads, labels, poi, borders for starry user circles)
 const PITCH_DARK_MAP_STYLE = [
   { elementType: "geometry", stylers: [{ color: "#09090b" }] },
@@ -155,6 +214,9 @@ export default function MapScreen() {
   // Search Modal state
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [geocodedLocations, setGeocodedLocations] = useState<LocationOption[]>([]);
+  const [searchingLocations, setSearchingLocations] = useState(false);
+  const [locationSearchError, setLocationSearchError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"all" | "district" | "city" | "world">("all");
   const [selectedLocationLabel, setSelectedLocationLabel] = useState<string | null>(null);
   const [destinationMarker, setDestinationMarker] = useState<{
@@ -173,6 +235,9 @@ export default function MapScreen() {
   const [vibeTitle, setVibeTitle] = useState("");
   const [vibeLocation, setVibeLocation] = useState<string | null>(null);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerLocations, setPickerLocations] = useState<LocationOption[]>([]);
+  const [searchingPickerLocations, setSearchingPickerLocations] = useState(false);
+  const [pickerSearchError, setPickerSearchError] = useState<string | null>(null);
   const [submittingVibe, setSubmittingVibe] = useState(false);
 
   useEffect(() => {
@@ -180,12 +245,16 @@ export default function MapScreen() {
 
     async function loadData() {
       try {
-        const [me, list] = await Promise.all([
-          apiGet<SessionUser>("/api/auth/me"),
-          apiGet<MapUser[]>("/api/users/nearby"),
-        ]);
+        const me = await apiGet<SessionUser>("/api/auth/me");
         if (cancelled) return;
         setUser(me);
+        if (!me.gender?.trim()) {
+          router.replace("/gender");
+          return;
+        }
+
+        const list = await apiGet<MapUser[]>("/api/users/nearby");
+        if (cancelled) return;
         setUsers(list.filter((u) => u.lat != null && u.lng != null));
       } catch {
         /* ignore */
@@ -197,7 +266,7 @@ export default function MapScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   const centerLat = user?.lat ?? 40.9927;
   const centerLng = user?.lng ?? 29.0277;
@@ -205,6 +274,11 @@ export default function MapScreen() {
   // Filtered locations for general search
   const filteredLocations = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase("tr-TR");
+    if (q.length >= 2) {
+      return geocodedLocations.filter(
+        (loc) => activeTab === "all" || loc.category === activeTab
+      );
+    }
     return POPULAR_LOCATIONS.filter((loc) => {
       const matchTab = activeTab === "all" || loc.category === activeTab;
       if (!matchTab) return false;
@@ -213,18 +287,90 @@ export default function MapScreen() {
       const subMatch = loc.subtitle.toLocaleLowerCase("tr-TR").includes(q);
       return titleMatch || subMatch;
     });
-  }, [searchQuery, activeTab]);
+  }, [searchQuery, activeTab, geocodedLocations]);
 
-  // Filtered locations for Vibe Location Picker
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setGeocodedLocations([]);
+      setSearchingLocations(false);
+      setLocationSearchError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setGeocodedLocations([]);
+    setSearchingLocations(true);
+    setLocationSearchError(null);
+    const timeout = setTimeout(() => {
+      void (async () => {
+        try {
+          const locations = await searchNominatimLocations(query, controller.signal);
+          if (!controller.signal.aborted) setGeocodedLocations(locations);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            setLocationSearchError(
+              error instanceof Error ? error.message : "Konumlar aranırken bir hata oluştu."
+            );
+          }
+        } finally {
+          if (!controller.signal.aborted) setSearchingLocations(false);
+        }
+      })();
+    }, 300);
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [searchQuery]);
+
+  // Search all Nominatim locations in the vibe picker, keeping popular places as idle suggestions.
   const filteredPickerLocations = useMemo(() => {
-    const q = pickerSearch.trim().toLocaleLowerCase("tr-TR");
-    if (!q) return POPULAR_LOCATIONS;
-    return POPULAR_LOCATIONS.filter((loc) => {
-      return (
-        loc.title.toLocaleLowerCase("tr-TR").includes(q) ||
-        loc.subtitle.toLocaleLowerCase("tr-TR").includes(q)
-      );
-    });
+    const query = pickerSearch.trim().toLocaleLowerCase("tr-TR");
+    if (query.length >= 2) return pickerLocations;
+    if (!query) return POPULAR_LOCATIONS;
+    return POPULAR_LOCATIONS.filter(
+      (location) =>
+        location.title.toLocaleLowerCase("tr-TR").includes(query) ||
+        location.subtitle.toLocaleLowerCase("tr-TR").includes(query)
+    );
+  }, [pickerSearch, pickerLocations]);
+
+  useEffect(() => {
+    const query = pickerSearch.trim();
+    if (query.length < 2) {
+      setPickerLocations([]);
+      setSearchingPickerLocations(false);
+      setPickerSearchError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setPickerLocations([]);
+    setSearchingPickerLocations(true);
+    setPickerSearchError(null);
+    const timeout = setTimeout(() => {
+      void (async () => {
+        try {
+          const locations = await searchNominatimLocations(query, controller.signal);
+          if (!controller.signal.aborted) setPickerLocations(locations);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            setPickerSearchError(
+              error instanceof Error ? error.message : "Konumlar aranırken bir hata oluştu."
+            );
+          }
+        } finally {
+          if (!controller.signal.aborted) setSearchingPickerLocations(false);
+        }
+      })();
+    }, 300);
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, [pickerSearch]);
 
   // Navigate Map to selected location with smooth animation
@@ -242,12 +388,13 @@ export default function MapScreen() {
     }
 
     setTimeout(() => {
+      const delta = loc.category === "district" ? 0.03 : 0.10;
       mapRef.current?.animateToRegion(
         {
           latitude: loc.lat,
           longitude: loc.lng,
-          latitudeDelta: loc.delta,
-          longitudeDelta: loc.delta,
+          latitudeDelta: delta,
+          longitudeDelta: delta,
         },
         1200
       );
@@ -813,12 +960,23 @@ export default function MapScreen() {
               }}
               ListEmptyComponent={
                 <View className="py-20 items-center">
-                  <Text className="text-zinc-500 text-base font-semibold">
-                    Sonuç bulunamadı
-                  </Text>
-                  <Text className="text-zinc-600 text-xs mt-1">
-                    Farklı bir ilçe veya şehir adı deneyebilirsiniz.
-                  </Text>
+                  {searchingLocations ? (
+                    <>
+                      <ActivityIndicator size="small" color="#a78bfa" />
+                      <Text className="text-zinc-500 text-sm mt-3">Konumlar aranıyor...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text className="text-zinc-500 text-base font-semibold">
+                        {locationSearchError ?? "Sonuç bulunamadı"}
+                      </Text>
+                      <Text className="text-zinc-600 text-xs mt-1 text-center px-6">
+                        {locationSearchError
+                          ? "Bağlantınızı kontrol edip tekrar deneyin."
+                          : "Farklı bir ilçe veya şehir adı deneyebilirsiniz."}
+                      </Text>
+                    </>
+                  )}
                 </View>
               }
               renderItem={({ item }) => {
@@ -1132,9 +1290,31 @@ export default function MapScreen() {
               <FlatList
                 data={filteredPickerLocations}
                 keyExtractor={(item) => item.id}
+                keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ padding: 16, gap: 8 }}
+                ListEmptyComponent={
+                  <View className="items-center py-16">
+                    {searchingPickerLocations ? (
+                      <>
+                        <ActivityIndicator size="small" color="#6ee7b7" />
+                        <Text className="mt-3 text-sm text-zinc-500">Konumlar aranıyor...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text className="text-sm font-semibold text-zinc-400">
+                          {pickerSearchError ?? "Konum bulunamadı"}
+                        </Text>
+                        <Text className="mt-1 px-5 text-center text-xs text-zinc-600">
+                          {pickerSearchError
+                            ? "Bağlantınızı kontrol edip yeniden deneyin."
+                            : "Başka bir şehir, ilçe veya semt arayın."}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                }
                 renderItem={({ item }) => {
-                  const formattedLoc = `${item.title}, ${item.subtitle.split(",")[0]}`;
+                  const formattedLoc = [item.title, item.subtitle].filter(Boolean).join(", ");
                   const isSelected = vibeLocation === formattedLoc;
                   return (
                     <Pressable

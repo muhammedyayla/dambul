@@ -15,16 +15,22 @@ export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  const navigateForUser = (user: SessionUser) => {
+    if (!profileComplete(user)) {
+      router.replace("/onboarding");
+    } else if (!user.gender?.trim()) {
+      router.replace("/gender");
+    } else {
+      router.replace("/(tabs)/map");
+    }
+  };
+
   const checkSessionAndNavigate = async (): Promise<boolean> => {
     try {
       const res = await apiFetch("/api/auth/me");
       if (res.ok) {
         const u = (await res.json()) as SessionUser;
-        if (profileComplete(u)) {
-          router.replace("/(tabs)/map");
-        } else {
-          router.replace("/onboarding");
-        }
+        navigateForUser(u);
         return true;
       }
     } catch {
@@ -118,11 +124,7 @@ export default function LoginScreen() {
         if (data.token) {
           await setToken(data.token);
         }
-        if (profileComplete(data.user)) {
-          router.replace("/(tabs)/map");
-        } else {
-          router.replace("/onboarding");
-        }
+        navigateForUser(data.user);
       }
     } catch (e: any) {
       Alert.alert("Hata", `Giriş yapılamadı: ${e?.message || e}`);
@@ -146,11 +148,7 @@ export default function LoginScreen() {
         if (data.token) {
           await setToken(data.token);
         }
-        if (profileComplete(data.user)) {
-          router.replace("/(tabs)/map");
-        } else {
-          router.replace("/onboarding");
-        }
+        navigateForUser(data.user);
       } else {
         Alert.alert("Hata", "Test kullanıcısı bulunamadı.");
       }

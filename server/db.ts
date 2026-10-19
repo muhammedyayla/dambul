@@ -148,6 +148,7 @@ export async function initSchema(): Promise<void> {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
       preferred_gender VARCHAR(20),
+      live_vibe TEXT,
       languages TEXT[],
       looking_for VARCHAR(50),
       personality_type VARCHAR(100),
@@ -165,6 +166,7 @@ export async function initSchema(): Promise<void> {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles(user_id);
+    ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS live_vibe TEXT;
     CREATE TABLE IF NOT EXISTS reports (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -184,6 +186,10 @@ export async function initSchema(): Promise<void> {
   // Eski şemadaki eksik kolonları güvenli şekilde tek tek ekle
   // (pg, tek query'de birden fazla ALTER TABLE'ı desteklemez)
   const migrations = [
+    `ALTER TABLE vibe_posts ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE`,
+    `ALTER TABLE vibe_posts ADD COLUMN IF NOT EXISTS title TEXT`,
+    `ALTER TABLE vibe_posts ADD COLUMN IF NOT EXISTS location_tag TEXT`,
+    `ALTER TABLE vibe_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS height INTEGER`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,

@@ -33,6 +33,7 @@ export default function OnboardingScreen() {
   const [city, setCity] = useState("İstanbul");
   const [age, setAge] = useState(25);
   const [heightCm, setHeightCm] = useState(175);
+  const [gender, setGender] = useState<"female" | "male" | null>(null);
   const [prefGender, setPrefGender] = useState<"female" | "male" | "everyone">("female");
   const [bio, setBio] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -84,6 +85,10 @@ export default function OnboardingScreen() {
       setErrorMsg("Lütfen şehrinizi belirtin.");
       return;
     }
+    if (!gender) {
+      setErrorMsg("Devam etmek için cinsiyetinizi seçin.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -103,6 +108,7 @@ export default function OnboardingScreen() {
         lng: 28.9784,
         birth_date: ageToBirthDate(age),
         height: heightCm,
+        gender,
         pref_gender: prefGender,
         bio: bio.trim() || null,
         avatar_url,
@@ -173,6 +179,36 @@ export default function OnboardingScreen() {
             placeholderTextColor="#71717a"
             className="h-13 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 text-base text-white"
           />
+        </View>
+
+        <View className="mb-5">
+          <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+            Cinsiyetim <Text className="text-rose-400">*</Text>
+          </Text>
+          <View className="flex-row gap-2">
+            {([
+              { label: "Kadın", value: "female" },
+              { label: "Erkek", value: "male" },
+            ] as const).map((item) => (
+              <Pressable
+                key={item.value}
+                onPress={() => setGender(item.value)}
+                className={`flex-1 h-12 items-center justify-center rounded-xl border ${
+                  gender === item.value
+                    ? "border-violet-500 bg-violet-600/20"
+                    : "border-zinc-800 bg-zinc-900"
+                }`}
+              >
+                <Text
+                  className={`text-sm font-semibold ${
+                    gender === item.value ? "text-violet-300" : "text-zinc-400"
+                  }`}
+                >
+                  {item.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         {/* Age Stepper */}

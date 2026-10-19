@@ -33,6 +33,7 @@ export type SessionUser = {
   preferred_gender?: string | null;
   languages?: string[] | null;
   looking_for?: string | null;
+  live_vibe?: string | null;
   personality_type?: string | null;
   alcohol_habit?: string | null;
   smoking_habit?: string | null;

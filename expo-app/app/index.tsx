@@ -30,6 +30,8 @@ export default function IndexScreen() {
         const u = (await res.json()) as SessionUser;
         if (!profileComplete(u)) {
           router.replace("/onboarding");
+        } else if (!u.gender?.trim()) {
+          router.replace("/gender");
         } else {
           router.replace("/(tabs)/map");
         }

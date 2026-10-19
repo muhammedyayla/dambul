@@ -41,6 +41,7 @@ export type ProfileDetailUser = {
   first_photo?: string | null;
   languages?: string[] | null;
   looking_for?: string | null;
+  live_vibe?: string | null;
   personality_type?: string | null;
   alcohol_habit?: string | null;
   smoking_habit?: string | null;
@@ -229,6 +230,16 @@ export function ProfileDetailView({
                 {user.city || "İstanbul, Kadıköy"}
               </Text>
             </View>
+
+            {user.live_vibe ? (
+              <View className="mt-3 self-start flex-row items-center gap-1.5 rounded-full border border-pink-400/50 bg-pink-950/70 px-3 py-1.5">
+                <Sparkles size={13} color="#f9a8d4" />
+                <Text className="text-[10px] font-black tracking-wider text-pink-300">
+                  LIVE VIBE
+                </Text>
+                <Text className="text-xs font-bold text-white">{user.live_vibe}</Text>
+              </View>
+            ) : null}
 
             <View className="flex-row items-center justify-between mt-3 pt-2 border-t border-white/10">
               <Text className="text-[11px] text-zinc-400 font-medium">

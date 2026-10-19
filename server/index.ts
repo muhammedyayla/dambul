@@ -630,6 +630,7 @@ app.get("/api/auth/me", async (req, res) => {
     preferred_gender: profile.preferred_gender || u.pref_gender || "everyone",
     languages: profile.languages || [],
     looking_for: profile.looking_for || null,
+    live_vibe: profile.live_vibe || null,
     personality_type: profile.personality_type || null,
     alcohol_habit: profile.alcohol_habit || null,
     smoking_habit: profile.smoking_habit || null,
@@ -694,6 +695,15 @@ app.post("/api/upload", requireLogin, (req, res, next) => {
 app.patch("/api/users/me", requireLogin, async (req, res) => {
   try {
     const b = req.body as Record<string, unknown>;
+    if (
+      "languages" in b &&
+      (!Array.isArray(b.languages) ||
+        b.languages.length > 3 ||
+        b.languages.some((language) => typeof language !== "string"))
+    ) {
+      return res.status(400).json({ error: "En fazla 3 dil seçebilirsiniz" });
+    }
+
     const allowed = [
       "name",
       "avatar_url",
@@ -726,6 +736,7 @@ app.patch("/api/users/me", requireLogin, async (req, res) => {
 
     const profileAllowed = [
       "preferred_gender",
+      "live_vibe",
       "languages",
       "looking_for",
       "personality_type",
@@ -806,6 +817,7 @@ app.patch("/api/users/me", requireLogin, async (req, res) => {
         preferred_gender: profile.preferred_gender || updatedUser.pref_gender || "everyone",
         languages: profile.languages || [],
         looking_for: profile.looking_for || null,
+        live_vibe: profile.live_vibe || null,
         personality_type: profile.personality_type || null,
         alcohol_habit: profile.alcohol_habit || null,
         smoking_habit: profile.smoking_habit || null,
@@ -887,7 +899,7 @@ app.get("/api/users/swipe", requireLogin, async (req, res) => {
   }
   const r = await pool.query(
     `SELECT u.*, 
-            p.preferred_gender, p.languages, p.looking_for, p.personality_type,
+            p.preferred_gender, p.languages, p.looking_for, p.live_vibe, p.personality_type,
             p.alcohol_habit, p.smoking_habit, p.education_level, p.family_plans,
             p.communication_style, p.pets, p.zodiac_sign, p.lifestyle_tags,
             p.favorite_activities, p.sports,
@@ -915,6 +927,7 @@ app.get("/api/users/swipe", requireLogin, async (req, res) => {
       preferred_gender: row.preferred_gender,
       languages: row.languages || [],
       looking_for: row.looking_for,
+      live_vibe: row.live_vibe,
       personality_type: row.personality_type,
       alcohol_habit: row.alcohol_habit,
       smoking_habit: row.smoking_habit,
@@ -1166,7 +1179,7 @@ app.get("/api/users/:userId", requireLogin, async (req, res) => {
   const targetUserId = req.params.userId;
   const r = await pool.query(
     `SELECT u.*, 
-            p.preferred_gender, p.languages, p.looking_for, p.personality_type,
+            p.preferred_gender, p.languages, p.looking_for, p.live_vibe, p.personality_type,
             p.alcohol_habit, p.smoking_habit, p.education_level, p.family_plans,
             p.communication_style, p.pets, p.zodiac_sign, p.lifestyle_tags,
             p.favorite_activities, p.sports,
@@ -1191,6 +1204,7 @@ app.get("/api/users/:userId", requireLogin, async (req, res) => {
     preferred_gender: row.preferred_gender,
     languages: row.languages || [],
     looking_for: row.looking_for,
+    live_vibe: row.live_vibe,
     personality_type: row.personality_type,
     alcohol_habit: row.alcohol_habit,
     smoking_habit: row.smoking_habit,

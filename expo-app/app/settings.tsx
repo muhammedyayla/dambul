@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  PanResponder,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -18,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  Pencil,
   X,
   Sparkles,
   Wine,
@@ -33,6 +36,8 @@ import {
   GraduationCap,
   Trophy,
   Globe,
+  Heart,
+  Ruler,
 } from "lucide-react-native";
 import { apiGet, apiPatch, apiPost, apiDelete } from "../src/api";
 import { clearToken } from "../src/auth";
@@ -57,6 +62,25 @@ import {
 } from "../src/constants/profileOptions";
 
 type UserPhoto = { id: string; url: string; order_index: number };
+type LiveVibeSheet = "looking_for" | "languages" | "mood" | null;
+
+const MOOD_OPTIONS = [
+  { emoji: "🔥", label: "Alev Alev" },
+  { emoji: "🙂", label: "Aptalca Hissediyorum" },
+  { emoji: "💩", label: "Aptallık Yapıyorum" },
+  { emoji: "🥵", label: "Ateşli Hissediyorum" },
+  { emoji: "😍", label: "Aşktan Başım Dönüyor" },
+  { emoji: "😎", label: "Aşırı Havalı" },
+  { emoji: "🤒", label: "Berbat Hissediyorum" },
+  { emoji: "😤", label: "Biraz Kızgınım" },
+  { emoji: "🛸", label: "Bu Dünyadan Değil" },
+  { emoji: "🥶", label: "Buz Gibi" },
+  { emoji: "😴", label: "Dalmışım" },
+  { emoji: "😭", label: "Dibe Vurdum" },
+  { emoji: "⚠️", label: "Dikkat Et!" },
+  { emoji: "💋", label: "Flört Modundayım" },
+  { emoji: "🤧", label: "Formdan Düşmüşüm" },
+] as const;
 
 type CategoryDef = {
   key: string;
@@ -86,6 +110,7 @@ const CATEGORIES: CategoryDef[] = [
     iconBg: "rgba(56, 189, 248, 0.15)",
     options: LANGUAGES_OPTIONS,
     isArrayField: true,
+    maxSelections: 3,
   },
   {
     key: "lifestyle_tags",
@@ -176,12 +201,20 @@ const CATEGORIES: CategoryDef[] = [
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const { width: screenWidth } = useWindowDimensions();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [bio, setBio] = useState("");
   const [height, setHeight] = useState("");
   const [photosOpen, setPhotosOpen] = useState(false);
+  const [genderOpen, setGenderOpen] = useState(false);
+  const [heightOpen, setHeightOpen] = useState(false);
+  const [liveVibeSheet, setLiveVibeSheet] = useState<LiveVibeSheet>(null);
+  const [draftLanguages, setDraftLanguages] = useState<string[]>([]);
+  const [savingVibe, setSavingVibe] = useState(false);
+  const [basicsY, setBasicsY] = useState(0);
   const [saving, setSaving] = useState(false);
 
   // Multi-Select Modal State
@@ -218,14 +251,68 @@ export default function SettingsScreen() {
   const saveBasics = async () => {
     setSaving(true);
     const h = parseInt(height, 10);
-    await patch({
-      name: name.trim(),
-      city: city.trim() || null,
-      bio: bio.trim() || null,
-      height: Number.isNaN(h) ? null : h,
+    try {
+      const next = await patch({
+        name: name.trim(),
+        city: city.trim() || null,
+        bio: bio.trim() || null,
+        height: Number.isNaN(h) ? null : h,
+      });
+      if (next) Alert.alert("Başarılı", "Temel bilgileriniz kaydedildi.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveGender = async (gender: "female" | "male") => {
+    const next = await patch({ gender });
+    if (next) setGenderOpen(false);
+  };
+
+  const openLanguagesSheet = () => {
+    setDraftLanguages([...(user?.languages ?? [])].slice(0, 3));
+    setLiveVibeSheet("languages");
+  };
+
+  const toggleLanguage = (language: string) => {
+    setDraftLanguages((current) => {
+      if (current.includes(language)) return current.filter((item) => item !== language);
+      if (current.length >= 3) {
+        Alert.alert("En fazla 3 dil", "Profilinizde en fazla üç dil seçebilirsiniz.");
+        return current;
+      }
+      return [...current, language];
     });
-    setSaving(false);
-    Alert.alert("Başarılı", "Temel bilgileriniz kaydedildi.");
+  };
+
+  const saveLanguages = async () => {
+    setSavingVibe(true);
+    try {
+      const next = await patch({ languages: draftLanguages });
+      if (next) setLiveVibeSheet(null);
+    } finally {
+      setSavingVibe(false);
+    }
+  };
+
+  const selectLookingFor = async (option: string) => {
+    setSavingVibe(true);
+    try {
+      const next = await patch({ looking_for: option });
+      if (next) setLiveVibeSheet(null);
+    } finally {
+      setSavingVibe(false);
+    }
+  };
+
+  const selectMood = async (mood: (typeof MOOD_OPTIONS)[number]) => {
+    setSavingVibe(true);
+    try {
+      const next = await patch({ live_vibe: `${mood.emoji} ${mood.label}` });
+      if (next) setLiveVibeSheet(null);
+    } finally {
+      setSavingVibe(false);
+    }
   };
 
   const logout = async () => {
@@ -321,6 +408,14 @@ export default function SettingsScreen() {
     return activeCategory.options.filter((opt) => opt.toLowerCase().includes(q));
   }, [activeCategory, modalSearch]);
 
+  const orbitStageWidth = Math.min(300, screenWidth - 40);
+  const avatarLeft = (orbitStageWidth - 160) / 2;
+  const leftOrbit = Math.max(0, orbitStageWidth * 0.07);
+  const rightOrbit = orbitStageWidth - 44 - leftOrbit;
+  const firstLanguageFlag = user?.languages?.[0]?.split(" ")[0];
+  const lookingForEmoji = user?.looking_for?.split(" ")[0];
+  const moodEmoji = user?.live_vibe?.split(" ")[0];
+
   if (!user) {
     return (
       <SafeAreaView
@@ -348,36 +443,100 @@ export default function SettingsScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 80, gap: 24 }}>
-        {/* Avatar & Photo Manage Trigger */}
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ padding: 20, paddingBottom: 80, gap: 24 }}
+      >
+        {/* Profile photo with distinct orbit actions */}
         <View className="items-center">
-          <Pressable
-            onPress={() => setPhotosOpen(true)}
-            className="relative h-32 w-32 items-center justify-center overflow-hidden rounded-full border-2 border-zinc-700 bg-zinc-900"
-            style={{ elevation: 8 }}
-          >
-            {user.avatar_url ? (
-              <Image source={{ uri: user.avatar_url }} className="h-full w-full object-cover" />
-            ) : (
-              <Text className="text-4xl font-bold text-zinc-500">{user.name ? user.name.slice(0, 1) : "D"}</Text>
-            )}
-
+          <View style={{ width: orbitStageWidth, height: 218, position: "relative" }}>
             <View
-              className="absolute bottom-1 right-1 h-9 w-9 items-center justify-center rounded-full bg-violet-600"
-              style={{ elevation: 4 }}
+              className="absolute items-center justify-center overflow-hidden rounded-full border-2 border-zinc-700 bg-zinc-900"
+              style={{ width: 160, height: 160, left: avatarLeft, top: 32, elevation: 8 }}
             >
-              <Camera size={18} color="#ffffff" />
+              {user.avatar_url ? (
+                <Image source={{ uri: user.avatar_url }} className="h-full w-full object-cover" />
+              ) : (
+                <Text className="text-4xl font-bold text-zinc-500">
+                  {user.name ? user.name.slice(0, 1) : "D"}
+                </Text>
+              )}
             </View>
-          </Pressable>
+
+            {[
+              {
+                key: "looking_for",
+                selected: lookingForEmoji,
+                style: { left: leftOrbit, top: 20 },
+                onPress: () => setLiveVibeSheet("looking_for"),
+              },
+              {
+                key: "languages",
+                selected: firstLanguageFlag,
+                style: { left: (orbitStageWidth - 44) / 2, top: 0 },
+                onPress: openLanguagesSheet,
+              },
+              {
+                key: "mood",
+                selected: moodEmoji,
+                style: { left: rightOrbit, top: 20 },
+                onPress: () => setLiveVibeSheet("mood"),
+              },
+              {
+                key: "edit",
+                selected: null,
+                style: { left: leftOrbit, top: 150 },
+                onPress: () => scrollRef.current?.scrollTo({ y: Math.max(0, basicsY - 20), animated: true }),
+              },
+              {
+                key: "photos",
+                selected: null,
+                style: { left: rightOrbit, top: 150 },
+                onPress: () => setPhotosOpen(true),
+              },
+            ].map((button) => (
+              <Pressable
+                key={button.key}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  button.key === "looking_for"
+                    ? "Burada ne arıyorsun"
+                    : button.key === "languages"
+                      ? "Dillerini seç"
+                      : button.key === "mood"
+                        ? "Bugün modun nasıl"
+                        : button.key === "edit"
+                          ? "Temel bilgileri düzenle"
+                          : "Profil fotoğraflarını yönet"
+                }
+                onPress={button.onPress}
+                className={`absolute h-11 w-11 items-center justify-center rounded-full border ${
+                  button.selected
+                    ? "border-pink-400 bg-pink-600"
+                    : "border-zinc-600 bg-zinc-900"
+                }`}
+                style={[button.style, { zIndex: 2, elevation: 8 }]}
+              >
+                {button.selected ? (
+                  <Text numberOfLines={1} style={{ color: "#ffffff", fontSize: 21 }}>
+                    {button.selected}
+                  </Text>
+                ) : button.key === "edit" ? (
+                  <Pencil size={18} color="#ffffff" />
+                ) : button.key === "photos" ? (
+                  <Camera size={19} color="#ffffff" />
+                ) : (
+                  <Plus size={21} color="#ffffff" strokeWidth={2.5} />
+                )}
+              </Pressable>
+            ))}
+          </View>
 
           <Text className="text-xl font-black text-white mt-3">{user.name}</Text>
-          <Pressable onPress={() => setPhotosOpen(true)} className="mt-1">
-            <Text className="text-xs font-semibold text-violet-400">Fotoğrafları Yönet (9 Slot)</Text>
-          </Pressable>
         </View>
 
         {/* Basic Fields */}
-        <View className="gap-4">
+        <View className="gap-4" onLayout={(event) => setBasicsY(event.nativeEvent.layout.y)}>
           <Text className="text-sm font-bold text-zinc-300">Temel Bilgiler</Text>
 
           <View>
@@ -393,13 +552,37 @@ export default function SettingsScreen() {
 
           <View>
             <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-1.5">
-              Şehir
+              Benim geldiğim yer
             </Text>
             <TextInput
               value={city}
               onChangeText={setCity}
+              placeholder="Şehir, ilçe veya semt yazın"
+              placeholderTextColor="#71717a"
               className="h-12 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-white"
             />
+            <Text className="text-[11px] text-zinc-500 mt-1">
+              İstediğiniz şehir, ilçe veya semti yazıp kaydedebilirsiniz.
+            </Text>
+          </View>
+
+          <View>
+            <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-1.5">
+              Cinsiyet
+            </Text>
+            <Pressable
+              onPress={() => setGenderOpen(true)}
+              className="h-12 flex-row items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900 px-4"
+            >
+              <Text className={user.gender ? "text-white" : "text-zinc-500"}>
+                {user.gender === "female"
+                  ? "Kadın"
+                  : user.gender === "male"
+                    ? "Erkek"
+                    : "Seçin"}
+              </Text>
+              <ChevronRight size={18} color="#71717a" />
+            </Pressable>
           </View>
 
           <View>
@@ -422,12 +605,13 @@ export default function SettingsScreen() {
             <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-1.5">
               Boy (cm)
             </Text>
-            <TextInput
-              value={height}
-              onChangeText={setHeight}
-              keyboardType="number-pad"
-              className="h-12 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-white"
-            />
+            <Pressable
+              onPress={() => setHeightOpen(true)}
+              className="h-12 flex-row items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900 px-4"
+            >
+              <Text className="text-white">{height ? `${height} cm` : "Boyunu paylaş"}</Text>
+              <ChevronRight size={18} color="#71717a" />
+            </Pressable>
           </View>
 
           <Pressable
@@ -443,11 +627,11 @@ export default function SettingsScreen() {
         <View className="h-[1px] bg-zinc-900" />
 
         {/* Preferences */}
-        <View className="gap-4">
-          <Text className="text-sm font-bold text-zinc-300">Tercihler</Text>
+        <View className="gap-5 rounded-[24px] border border-zinc-800 bg-[#18181b] p-5">
+          <Text className="text-xl font-bold text-white">Tercihler</Text>
 
           <View>
-            <Text className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+            <Text className="mb-3 text-base font-bold text-white">
               Görmek İstiyorum
             </Text>
             <View className="flex-row gap-2">
@@ -461,15 +645,20 @@ export default function SettingsScreen() {
                 <Pressable
                   key={item.val}
                   onPress={() => void patch({ pref_gender: item.val })}
-                  className={`flex-1 h-11 items-center justify-center rounded-xl border ${
+                  className={`flex-1 h-[54px] items-center justify-center rounded-2xl border ${
                     user.pref_gender === item.val
-                      ? "border-violet-500 bg-violet-600/20"
-                      : "border-zinc-800 bg-zinc-900"
+                      ? "border-pink-400 bg-pink-600"
+                      : "border-zinc-700 bg-zinc-900"
                   }`}
+                  style={
+                    user.pref_gender === item.val
+                      ? { shadowColor: "#ec4899", shadowOpacity: 0.35, shadowRadius: 10, elevation: 5 }
+                      : undefined
+                  }
                 >
                   <Text
                     className={`text-xs font-semibold ${
-                      user.pref_gender === item.val ? "text-violet-300" : "text-zinc-400"
+                      user.pref_gender === item.val ? "text-white" : "text-zinc-400"
                     }`}
                   >
                     {item.label}
@@ -479,17 +668,40 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          <View className="flex-row justify-between items-center py-2">
-            <Text className="text-sm text-zinc-300">Maksimum Mesafe</Text>
-            <Text className="text-sm font-bold text-violet-400">{user.pref_distance_km} km</Text>
-          </View>
+          <PreferenceRange
+            label="Yaş aralığı"
+            valueLabel={`${user.pref_age_min} - ${user.pref_age_max}`}
+            values={[user.pref_age_min, user.pref_age_max]}
+            min={18}
+            max={100}
+            labels={["18", "100"]}
+            onCommit={(values) =>
+              void patch({ pref_age_min: values[0], pref_age_max: values[1] })
+            }
+          />
 
-          <View className="flex-row justify-between items-center py-2">
-            <Text className="text-sm text-zinc-300">Yaş Aralığı</Text>
-            <Text className="text-sm font-bold text-violet-400">
-              {user.pref_age_min} - {user.pref_age_max}
-            </Text>
-          </View>
+          <PreferenceRange
+            label="Mesafe"
+            valueLabel={`${user.pref_distance_km >= 500 ? "max" : user.pref_distance_km === 5 ? "min" : `${user.pref_distance_km} km`}`}
+            values={[user.pref_distance_km]}
+            min={5}
+            max={500}
+            snapPoints={[5, 25, 50, 100, 500]}
+            labels={["min", "25 km", "50 km", "100 km", "max"]}
+            onCommit={(values) => void patch({ pref_distance_km: values[0] })}
+          />
+
+          <PreferenceRange
+            label="Boy"
+            valueLabel={`${Math.min(209, user.pref_height_min)} - ${Math.min(210, user.pref_height_max)} cm`}
+            values={[Math.min(209, user.pref_height_min), Math.min(210, user.pref_height_max)]}
+            min={130}
+            max={210}
+            labels={["130 cm", "210 cm"]}
+            onCommit={(values) =>
+              void patch({ pref_height_min: values[0], pref_height_max: values[1] })
+            }
+          />
         </View>
 
         <View className="h-[1px] bg-zinc-900" />
@@ -804,7 +1016,497 @@ export default function SettingsScreen() {
         onClose={() => setPhotosOpen(false)}
         onUpdate={setUser}
       />
+
+      <Modal
+        visible={heightOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setHeightOpen(false)}
+      >
+        <View className="flex-1 justify-end bg-black/70">
+          <View
+            style={{ paddingBottom: Math.max(insets.bottom, 20) + 16 }}
+            className="rounded-t-3xl border-t border-zinc-800 bg-zinc-950 p-5"
+          >
+            <View className="flex-row items-start justify-between">
+              <View>
+                <View className="mb-2 flex-row items-center gap-2">
+                  <Ruler size={17} color="#ec4899" />
+                  <Text className="text-xs font-bold tracking-[1.5px] text-pink-400">BASICS</Text>
+                </View>
+                <Text className="text-2xl font-extrabold text-white">Boy</Text>
+                <Text className="mt-1 text-sm text-zinc-400">Boyunu paylaş</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Boy seçimini kapat"
+                onPress={() => setHeightOpen(false)}
+                className="h-9 w-9 items-center justify-center rounded-full bg-zinc-900"
+              >
+                <ChevronDown size={19} color="#ffffff" />
+              </Pressable>
+            </View>
+            <Text className="mt-8 text-center text-[32px] font-extrabold text-white">
+              {height || "175"} cm
+            </Text>
+            <DraggableSlider
+              values={[Number(height) || 175]}
+              min={130}
+              max={210}
+              onCommit={(values) => {
+                const value = values[0];
+                setHeight(String(value));
+                void patch({ height: value });
+              }}
+            />
+            <View className="mt-6 items-center">
+              <View className="flex-row items-center rounded-full border border-zinc-700 bg-zinc-900 p-1">
+                <View className="rounded-full bg-pink-500 px-5 py-2">
+                  <Text className="text-sm font-bold text-white">cm</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={liveVibeSheet !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLiveVibeSheet(null)}
+      >
+        <View className="flex-1 justify-end bg-black/70">
+          <View
+            style={{ maxHeight: "88%", paddingBottom: Math.max(insets.bottom, 16) + 12 }}
+            className="rounded-t-[32px] border-t border-zinc-800 bg-zinc-950 px-5 pt-6"
+          >
+            <View className="flex-row items-start justify-between">
+              <View className="flex-1 pr-4">
+                <View className="mb-2 flex-row items-center gap-2">
+                  {liveVibeSheet === "looking_for" ? (
+                    <Heart size={17} color="#ffffff" />
+                  ) : liveVibeSheet === "languages" ? (
+                    <Globe size={18} color="#ffffff" />
+                  ) : (
+                    <Smile size={18} color="#ffffff" />
+                  )}
+                  <Text className="text-xs font-black tracking-[1.5px] text-pink-400">
+                    LIVE VIBE
+                  </Text>
+                </View>
+                <Text className="text-2xl font-extrabold text-white">
+                  {liveVibeSheet === "looking_for"
+                    ? "Burada ne arıyorsun"
+                    : liveVibeSheet === "languages"
+                      ? "Dilinizi seçiniz"
+                      : "Bugün modun nasıl"}
+                </Text>
+                {liveVibeSheet === "languages" ? (
+                  <Text className="mt-1 text-sm font-semibold text-zinc-500">
+                    {draftLanguages.length}/3
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable
+                accessibilityLabel="Kapat"
+                onPress={() => setLiveVibeSheet(null)}
+                className="h-9 w-9 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900"
+              >
+                <ChevronDown size={19} color="#ffffff" />
+              </Pressable>
+            </View>
+
+            {liveVibeSheet === "looking_for" ? (
+              <ScrollView
+                contentContainerStyle={{ paddingTop: 22, paddingBottom: 16, gap: 10 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <View className="flex-row flex-wrap justify-between gap-y-3">
+                  {LOOKING_FOR_OPTIONS.map((option) => {
+                    const isSelected = user.looking_for === option;
+                    return (
+                      <Pressable
+                        key={option}
+                        disabled={savingVibe}
+                        onPress={() => void selectLookingFor(option)}
+                        style={{ width: (screenWidth - 60) / 2, minHeight: 54 }}
+                        className={`flex-row items-center justify-center rounded-full border px-3 ${
+                          isSelected
+                            ? "border-pink-500 bg-pink-950/70"
+                            : "border-zinc-800 bg-zinc-900"
+                        }`}
+                      >
+                        <Text className="text-center text-sm font-semibold text-white">
+                          {option}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            ) : liveVibeSheet === "languages" ? (
+              <>
+                <ScrollView
+                  contentContainerStyle={{ paddingTop: 18, paddingBottom: 18, gap: 10 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View className="flex-row flex-wrap gap-2.5">
+                    {LANGUAGES_OPTIONS.map((language) => {
+                      const [flag, ...nameParts] = language.split(" ");
+                      const isSelected = draftLanguages.includes(language);
+                      return (
+                        <Pressable
+                          key={language}
+                          onPress={() => toggleLanguage(language)}
+                          className={`flex-row items-center gap-2 rounded-full border px-3 py-2.5 ${
+                            isSelected
+                              ? "border-pink-500 bg-pink-950/70"
+                              : "border-zinc-800 bg-zinc-900"
+                          }`}
+                        >
+                          <View className="h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
+                            <Text style={{ fontSize: 16 }}>{flag}</Text>
+                          </View>
+                          <Text className="text-sm font-semibold text-white">
+                            {nameParts.join(" ")}
+                          </Text>
+                          {isSelected ? <Check size={15} color="#f9a8d4" /> : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+                <Pressable
+                  disabled={savingVibe}
+                  onPress={() => void saveLanguages()}
+                  className="mb-3 h-12 items-center justify-center rounded-2xl bg-pink-600 active:bg-pink-700"
+                >
+                  {savingVibe ? (
+                    <ActivityIndicator color="#ffffff" />
+                  ) : (
+                    <Text className="font-bold text-white">Kaydet</Text>
+                  )}
+                </Pressable>
+              </>
+            ) : liveVibeSheet === "mood" ? (
+              <ScrollView
+                contentContainerStyle={{ paddingTop: 18, paddingBottom: 16 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <View className="flex-row flex-wrap gap-2">
+                  {MOOD_OPTIONS.map((mood) => {
+                    const value = `${mood.emoji} ${mood.label}`;
+                    const isSelected = user.live_vibe === value;
+                    return (
+                      <Pressable
+                        key={mood.label}
+                        disabled={savingVibe}
+                        onPress={() => void selectMood(mood)}
+                        style={{ width: (screenWidth - 56) / 3, minHeight: 116 }}
+                        className={`items-center justify-between rounded-[18px] border px-2.5 py-3 ${
+                          isSelected
+                            ? "border-pink-500 bg-pink-950/60"
+                            : "border-zinc-800 bg-zinc-900"
+                        }`}
+                      >
+                        <Text
+                          numberOfLines={2}
+                          className="min-h-9 text-center text-[11px] font-semibold leading-4 text-zinc-200"
+                        >
+                          {mood.label}
+                        </Text>
+                        <Text style={{ fontSize: 36, lineHeight: 44 }}>{mood.emoji}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={genderOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setGenderOpen(false)}
+      >
+        <View className="flex-1 justify-end bg-black/70">
+          <View
+            style={{ paddingBottom: Math.max(insets.bottom, 20) + 16 }}
+            className="rounded-t-3xl border-t border-zinc-800 bg-zinc-950 p-5"
+          >
+            <View className="flex-row items-center justify-between pb-4">
+              <View>
+                <Text className="text-lg font-bold text-white">Cinsiyetim</Text>
+                <Text className="text-xs text-zinc-500 mt-1">Profilinizde görünecek</Text>
+              </View>
+              <Pressable
+                onPress={() => setGenderOpen(false)}
+                className="h-9 w-9 items-center justify-center rounded-full bg-zinc-900"
+              >
+                <X size={18} color="#a1a1aa" />
+              </Pressable>
+            </View>
+            {([
+              { label: "Kadın", value: "female" },
+              { label: "Erkek", value: "male" },
+            ] as const).map((option) => (
+              <Pressable
+                key={option.value}
+                onPress={() => void saveGender(option.value)}
+                className={`mb-2 h-12 flex-row items-center justify-between rounded-xl border px-4 ${
+                  user.gender === option.value
+                    ? "border-violet-500 bg-violet-600/20"
+                    : "border-zinc-800 bg-zinc-900"
+                }`}
+              >
+                <Text
+                  className={`font-semibold ${
+                    user.gender === option.value ? "text-violet-300" : "text-zinc-300"
+                  }`}
+                >
+                  {option.label}
+                </Text>
+                {user.gender === option.value ? <Check size={18} color="#c4b5fd" /> : null}
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function PreferenceRange({
+  label,
+  valueLabel,
+  values,
+  min,
+  max,
+  labels,
+  snapPoints,
+  onCommit,
+}: {
+  label: string;
+  valueLabel: string;
+  values: number[];
+  min: number;
+  max: number;
+  labels: string[];
+  snapPoints?: number[];
+  onCommit: (values: number[]) => void;
+}) {
+  return (
+    <View className="gap-1.5">
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm font-semibold text-zinc-400">{label}</Text>
+        <Text className="text-sm font-bold text-pink-300">{valueLabel}</Text>
+      </View>
+      <DraggableSlider
+        values={values}
+        min={min}
+        max={max}
+        labels={labels}
+        snapPoints={snapPoints}
+        onCommit={onCommit}
+      />
+    </View>
+  );
+}
+
+function DraggableSlider({
+  values,
+  min,
+  max,
+  labels = [],
+  snapPoints,
+  onCommit,
+}: {
+  values: number[];
+  min: number;
+  max: number;
+  labels?: string[];
+  snapPoints?: number[];
+  onCommit: (values: number[]) => void;
+}) {
+  const [draftValues, setDraftValues] = useState(values);
+  const [sliderWidth, setSliderWidth] = useState(0);
+  const widthRef = useRef(0);
+  const valuesRef = useRef(values);
+  const activeThumbRef = useRef(0);
+  const configRef = useRef({ min, max, snapPoints, onCommit });
+  configRef.current = { min, max, snapPoints, onCommit };
+  valuesRef.current = draftValues;
+
+  useEffect(() => {
+    const normalized = values.map((value) => Math.max(min, Math.min(max, value)));
+    valuesRef.current = normalized;
+    setDraftValues(normalized);
+  }, [values.join(","), min, max]);
+
+  const updateFromX = (locationX: number) => {
+    const { min: lowerBound, max: upperBound, snapPoints: stops } = configRef.current;
+    const usableWidth = Math.max(widthRef.current - 28, 1);
+    const ratio = Math.max(0, Math.min(1, (locationX - 14) / usableWidth));
+    let nextValue: number;
+
+    if (stops?.length) {
+      const allowedStops = stops.filter((stop) => {
+        if (valuesRef.current.length === 1) return true;
+        const other = valuesRef.current[activeThumbRef.current === 0 ? 1 : 0];
+        return activeThumbRef.current === 0 ? stop < other : stop > other;
+      });
+      const stopIndex = Math.round(ratio * (stops.length - 1));
+      const suggestedStop = stops[stopIndex];
+      nextValue =
+        allowedStops.find((stop) => stop === suggestedStop) ??
+        allowedStops.reduce(
+          (closest, stop) =>
+            Math.abs(stop - suggestedStop) < Math.abs(closest - suggestedStop) ? stop : closest,
+          allowedStops[0] ?? stops[0]
+        );
+    } else {
+      const rawValue = lowerBound + ratio * (upperBound - lowerBound);
+      nextValue = Math.round(rawValue);
+      if (valuesRef.current.length > 1) {
+        const other = valuesRef.current[activeThumbRef.current === 0 ? 1 : 0];
+        nextValue =
+          activeThumbRef.current === 0
+            ? Math.min(nextValue, other - 1)
+            : Math.max(nextValue, other + 1);
+      }
+      nextValue = Math.max(lowerBound, Math.min(upperBound, nextValue));
+    }
+
+    const nextValues = [...valuesRef.current];
+    nextValues[activeThumbRef.current] = nextValue;
+    valuesRef.current = nextValues;
+    setDraftValues(nextValues);
+  };
+
+  const responder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (event) => {
+        const currentValues = valuesRef.current;
+        const { min: lowerBound, max: upperBound, snapPoints: stops } = configRef.current;
+        const usableWidth = Math.max(widthRef.current - 28, 1);
+        const x = Math.max(0, Math.min(1, (event.nativeEvent.locationX - 14) / usableWidth));
+        const touchedValue =
+          stops?.length
+            ? stops[Math.round(x * (stops.length - 1))]
+            : lowerBound + x * (upperBound - lowerBound);
+        activeThumbRef.current =
+          currentValues.length === 1 ||
+          Math.abs(currentValues[0] - touchedValue) <= Math.abs(currentValues[1] - touchedValue)
+            ? 0
+            : 1;
+        updateFromX(event.nativeEvent.locationX);
+      },
+      onPanResponderMove: (event) => updateFromX(event.nativeEvent.locationX),
+      onPanResponderRelease: () => configRef.current.onCommit(valuesRef.current),
+      onPanResponderTerminate: () => configRef.current.onCommit(valuesRef.current),
+    })
+  ).current;
+
+  const positions = draftValues.map((value) => {
+    const snapIndex = snapPoints?.indexOf(value) ?? -1;
+    const ratio =
+      snapPoints?.length && snapIndex >= 0
+        ? snapIndex / Math.max(snapPoints.length - 1, 1)
+        : (value - min) / Math.max(max - min, 1);
+    return Math.max(0, Math.min(100, ratio * 100));
+  });
+  const usableWidth = Math.max(sliderWidth - 28, 0);
+  const thumbPositions = positions.map((position) => 14 + (usableWidth * position) / 100);
+  const trackStart = positions.length > 1 ? thumbPositions[0] : 14;
+  const trackEnd = positions.length > 1 ? thumbPositions[1] : thumbPositions[0];
+
+  return (
+    <View>
+      <View
+        {...responder.panHandlers}
+        onLayout={(event) => {
+          widthRef.current = event.nativeEvent.layout.width;
+          setSliderWidth(event.nativeEvent.layout.width);
+        }}
+        accessibilityRole="adjustable"
+        style={{ height: 44, justifyContent: "center" }}
+      >
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 14,
+            right: 14,
+            top: 19,
+            height: 6,
+            borderRadius: 99,
+            backgroundColor: "#4a153b",
+          }}
+        />
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: trackStart,
+            width: Math.max(0, trackEnd - trackStart),
+            top: 19,
+            height: 6,
+            borderRadius: 99,
+            backgroundColor: "#ec4899",
+          }}
+        />
+        {snapPoints?.map((stop, index) => (
+          <View
+            key={stop}
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: 14 + (usableWidth * index) / Math.max(snapPoints.length - 1, 1),
+              top: 17,
+              width: 10,
+              height: 10,
+              marginLeft: -5,
+              borderRadius: 5,
+              backgroundColor: "#d4d4d8",
+            }}
+          />
+        ))}
+        {positions.map((position, index) => (
+          <View
+            key={index}
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: thumbPositions[index],
+              top: 8,
+              width: 28,
+              height: 28,
+              marginLeft: -14,
+              borderRadius: 14,
+              borderWidth: 2,
+              borderColor: "#ffffff",
+              backgroundColor: "#ec4899",
+              elevation: 4,
+            }}
+          />
+        ))}
+      </View>
+      {labels.length > 0 ? (
+        <View className="flex-row items-center justify-between px-0.5">
+          {labels.map((label, index) => (
+            <Text key={`${label}-${index}`} className="text-[10px] font-medium text-zinc-500">
+              {label}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -822,14 +1524,21 @@ function PhotoManagerModal({
 }) {
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const [loading, setLoading] = useState(false);
+  const gridWidth = Math.min(windowWidth - 40, 460);
+  const gap = 10;
+  const cell = (gridWidth - gap * 2) / 3;
 
   const loadPhotos = async () => {
     try {
       const phs = await apiGet<UserPhoto[]>(`/api/users/${user.id}/photos`);
       setPhotos(phs);
-    } catch {
-      /* ignore */
+    } catch (error) {
+      Alert.alert(
+        "Hata",
+        error instanceof Error ? error.message : "Fotoğraflar yüklenemedi."
+      );
     }
   };
 
@@ -875,51 +1584,93 @@ function PhotoManagerModal({
     return { url: p?.url, isMain: false, id: p?.id };
   });
 
+  const renderSlot = (index: number, width: number, height: number, isMain = false) => {
+    const slot = slots[index];
+    if (!slot) return null;
+    return (
+      <Pressable
+        key={index}
+        disabled={loading}
+        onPress={() => void uploadPhotoSlot(index, slot.id)}
+        style={{ width, height }}
+        className="relative overflow-hidden rounded-[18px] border border-zinc-800 bg-[#050507]"
+      >
+        {slot.url ? (
+          <Image source={{ uri: slot.url }} className="h-full w-full" resizeMode="cover" />
+        ) : (
+          <View className="flex-1 items-center justify-center">
+            <Plus size={26} color="#ffffff" />
+            {!isMain ? (
+              <Text className="mt-1 text-[10px] font-semibold text-zinc-500">
+                Fotoğraf ekle
+              </Text>
+            ) : null}
+          </View>
+        )}
+        {isMain ? (
+          <View className="absolute left-0 right-0 top-3 items-center">
+            <View className="rounded-full bg-black/65 px-3 py-1.5">
+              <Text className="text-xs font-bold text-white">Ana fotoğraf</Text>
+            </View>
+          </View>
+        ) : null}
+        <View className="absolute bottom-2 right-2 h-9 w-9 items-center justify-center rounded-full bg-black/75">
+          <Camera size={16} color="#ffffff" />
+          <View className="absolute -right-0.5 -top-0.5 h-4 w-4 items-center justify-center rounded-full bg-pink-500">
+            <Plus size={10} color="#ffffff" strokeWidth={3} />
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View className="flex-1 bg-black/70 justify-end">
-        <View style={{ paddingBottom: Math.max(insets.bottom, 20) + 16 }}
-          className="h-[80%] rounded-t-3xl border-t border-zinc-800 bg-zinc-950 p-5">
-          <View className="flex-row items-center justify-between pb-4 border-b border-zinc-900">
-            <View>
-              <Text className="text-lg font-bold text-white">Fotoğrafların</Text>
-              <Text className="text-[11px] text-zinc-500 mt-0.5">İlk kare kapak fotoğrafın olur</Text>
+      <View className="flex-1 justify-end bg-black/70">
+        <View
+          style={{ height: "88%", paddingBottom: Math.max(insets.bottom, 16) + 12 }}
+          className="rounded-t-3xl border-t border-zinc-800 bg-zinc-950 px-5 pt-5"
+        >
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-2">
+              <Camera size={16} color="#ec4899" />
+              <Text className="text-xs font-bold tracking-[1.5px] text-pink-400">PROFILE</Text>
             </View>
-            <Pressable onPress={onClose} className="h-8 w-8 items-center justify-center rounded-full bg-zinc-900">
-              <X size={18} color="#a1a1aa" />
+            <Pressable
+              accessibilityLabel="Fotoğrafları kapat"
+              onPress={onClose}
+              className="h-9 w-9 items-center justify-center rounded-full bg-zinc-900"
+            >
+              <ChevronDown size={19} color="#ffffff" />
             </Pressable>
           </View>
+          <Text className="mt-4 text-2xl font-extrabold text-white">Profil fotoğrafları</Text>
+          <Text className="mt-1 text-sm leading-5 text-zinc-400">
+            Diğerlerinin gerçek seni görmesi için bir profil fotoğrafı yükle.
+          </Text>
 
-          {loading ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#8b5cf6" />
+          <ScrollView
+            contentContainerStyle={{ alignItems: "center", paddingTop: 18, paddingBottom: 24 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {loading ? (
+              <View className="absolute z-10 h-full w-full items-center justify-center bg-black/30">
+                <ActivityIndicator size="large" color="#ec4899" />
+              </View>
+            ) : null}
+            <View style={{ width: gridWidth, gap }}>
+              <View style={{ flexDirection: "row", gap }}>
+                {renderSlot(0, cell * 2 + gap, cell * 2 + gap, true)}
+                <View style={{ gap }}>
+                  {renderSlot(1, cell, cell)}
+                  {renderSlot(2, cell, cell)}
+                </View>
+              </View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap }}>
+                {slots.slice(3).map((_, offset) => renderSlot(offset + 3, cell, cell))}
+              </View>
             </View>
-          ) : (
-            <View className="flex-row flex-wrap gap-2.5 pt-4 justify-center">
-              {slots.map((s, idx) => (
-                <Pressable
-                  key={idx}
-                  onPress={() => void uploadPhotoSlot(idx, s.id)}
-                  className={`h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border ${
-                    idx === 0
-                      ? "border-violet-500 bg-violet-950/20"
-                      : "border-zinc-800 bg-zinc-900"
-                  }`}
-                >
-                  {s.url ? (
-                    <Image source={{ uri: s.url }} className="h-full w-full object-cover" />
-                  ) : (
-                    <View className="items-center">
-                      <Plus size={20} color="#71717a" />
-                      <Text className="text-[10px] text-zinc-500 mt-1">
-                        {idx === 0 ? "Ana Foto" : `Slot ${idx + 1}`}
-                      </Text>
-                    </View>
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          )}
+          </ScrollView>
         </View>
       </View>
     </Modal>
