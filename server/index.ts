@@ -33,10 +33,7 @@ function verifyToken(token: string): string | null {
 }
 
 const FRONTEND_ORIGIN =
-  process.env.FRONTEND_ORIGIN ||
-  (process.env.NODE_ENV === "production"
-    ? "https://dambul.onrender.com"
-    : "http://localhost:5173");
+  process.env.FRONTEND_ORIGIN || "https://dambul.onrender.com";
 const CLOUDINARY_CLOUD =
   process.env.cloudinary_cloud_name || process.env.CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_KEY = process.env.cloudinary_api_key || process.env.CLOUDINARY_API_KEY;
@@ -52,7 +49,7 @@ cloudinary.config({
 const API_PORT = Number(process.env.PORT) || 3001;
 const CALLBACK_URL =
   process.env.GOOGLE_CALLBACK_URL ||
-  "http://localhost:3001/api/auth/google/callback";
+  "https://dambul.onrender.com/api/auth/google/callback";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const upload = multer({
@@ -74,82 +71,6 @@ function publicBaseUrl(req: Request): string {
   return `${proto}://${host}`;
 }
 
-function isLoopbackOrPrivate(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
-    // Yerel ağ IP aralıkları (10.x, 172.16-31.x, 192.168.x)
-    const parts = hostname.split(".");
-    if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
-      const [a, b] = parts.map(Number);
-      if (a === 10) return true;
-      if (a === 172 && b >= 16 && b <= 31) return true;
-      if (a === 192 && b === 168) return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/** Eski fonksiyon adını koruyan alias (sadece loopback kontrol eder) */
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  } catch {
-    return false;
-  }
-}
-
-/** Bilinen production domain'i mi kontrol eder */
-function isKnownProductionHost(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname.endsWith(".onrender.com") || hostname === "dambul.onrender.com";
-  } catch {
-    return false;
-  }
-}
-
-function getGoogleCallbackUrl(req?: Request, mobile = false): string {
-  const configuredCallbackUrl = process.env.GOOGLE_CALLBACK_URL;
-
-  if (mobile) {
-    // 1) Env'de GOOGLE_CALLBACK_URL varsa onu kullan
-    if (configuredCallbackUrl) return configuredCallbackUrl;
-    // 2) İstek production host'tan geliyorsa, o host'un HTTPS callback'ini oluştur
-    if (req) {
-      const base = publicBaseUrl(req);
-      if (!isLoopbackOrPrivate(base)) {
-        return `${base}/api/auth/google/callback`;
-      }
-    }
-    // 3) Fallback: bilinen production URL
-    return "https://dambul.onrender.com/api/auth/google/callback";
-  }
-
-  // Lokal web geliştirme: tarayıcıdan localhost isteği geliyorsa localhost callback kullan
-  if (req && isLoopbackUrl(`${req.protocol}://${req.hostname}`)) {
-    return `http://localhost:${API_PORT}/api/auth/google/callback`;
-  }
-  // Production veya yapılandırılmış URL varsa kullan
-  if (configuredCallbackUrl) {
-    return configuredCallbackUrl;
-  }
-  // Fallback: istek host'unu kullan
-  if (req) {
-    return `${publicBaseUrl(req)}/api/auth/google/callback`;
-  }
-  return CALLBACK_URL;
-}
-
-function getFrontendOrigin(req?: Request): string {
-  if (req && isLoopbackUrl(`${req.protocol}://${req.hostname}`)) {
-    return "http://localhost:5173";
-  }
-  return FRONTEND_ORIGIN;
-}
 
 async function persistImageBuffer(
   req: Request,
