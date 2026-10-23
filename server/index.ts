@@ -74,6 +74,25 @@ function publicBaseUrl(req: Request): string {
   return `${proto}://${host}`;
 }
 
+function isLoopbackOrPrivate(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+    // Yerel ağ IP aralıkları (10.x, 172.16-31.x, 192.168.x)
+    const parts = hostname.split(".");
+    if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
+      const [a, b] = parts.map(Number);
+      if (a === 10) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Eski fonksiyon adını koruyan alias (sadece loopback kontrol eder) */
 function isLoopbackUrl(url: string): boolean {
   try {
     const hostname = new URL(url).hostname;
@@ -83,21 +102,46 @@ function isLoopbackUrl(url: string): boolean {
   }
 }
 
+/** Bilinen production domain'i mi kontrol eder */
+function isKnownProductionHost(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.endsWith(".onrender.com") || hostname === "dambul.onrender.com";
+  } catch {
+    return false;
+  }
+}
+
 function getGoogleCallbackUrl(req?: Request, mobile = false): string {
   const configuredCallbackUrl = process.env.GOOGLE_CALLBACK_URL;
+
   if (mobile) {
-    return configuredCallbackUrl || "https://dambul.onrender.com/api/auth/google/callback";
+    // 1) Env'de GOOGLE_CALLBACK_URL varsa onu kullan
+    if (configuredCallbackUrl) return configuredCallbackUrl;
+    // 2) İstek production host'tan geliyorsa, o host'un HTTPS callback'ini oluştur
+    if (req) {
+      const base = publicBaseUrl(req);
+      if (!isLoopbackOrPrivate(base)) {
+        return `${base}/api/auth/google/callback`;
+      }
+    }
+    // 3) Fallback: bilinen production URL
+    return "https://dambul.onrender.com/api/auth/google/callback";
   }
+
+  // Lokal web geliştirme: tarayıcıdan localhost isteği geliyorsa localhost callback kullan
   if (req && isLoopbackUrl(`${req.protocol}://${req.hostname}`)) {
     return `http://localhost:${API_PORT}/api/auth/google/callback`;
   }
+  // Production veya yapılandırılmış URL varsa kullan
   if (configuredCallbackUrl) {
     return configuredCallbackUrl;
   }
+  // Fallback: istek host'unu kullan
   if (req) {
     return `${publicBaseUrl(req)}/api/auth/google/callback`;
   }
-  return configuredCallbackUrl || CALLBACK_URL;
+  return CALLBACK_URL;
 }
 
 function getFrontendOrigin(req?: Request): string {
@@ -281,9 +325,11 @@ if (clientId && clientSecret) {
       {
         clientID: clientId,
         clientSecret: clientSecret,
+        // Varsayılan callbackURL — istek bazında /api/auth/google route'unda override edilir
         callbackURL: CALLBACK_URL,
+        passReqToCallback: true,
       },
-      async (_accessToken, _refreshToken, profile, done) => {
+      async (_req: any, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
         try {
           const googleId = profile.id;
           const email = profile.emails?.[0]?.value ?? null;
@@ -440,7 +486,9 @@ app.get("/api/auth/google", (req, res, next) => {
         error: "Mobil Google OAuth callback adresi geçersiz. HTTPS tünel adresi kullanın.",
       });
     }
-    if (callback.protocol !== "https:" || isLoopbackUrl(callbackURL)) {
+    // Production veya bilinen host ise güvenlik kontrolünü atla
+    const isProduction = process.env.NODE_ENV === "production" || isKnownProductionHost(callbackURL);
+    if (!isProduction && (callback.protocol !== "https:" || isLoopbackOrPrivate(callbackURL))) {
       console.error(
         `[google-auth] Mobil OAuth için HTTPS ve localhost olmayan public callback gerekli. ` +
           `Mevcut URI: ${callbackURL}. GOOGLE_CALLBACK_URL değerini HTTPS tünel adresinizle ayarlayın.`
@@ -451,7 +499,7 @@ app.get("/api/auth/google", (req, res, next) => {
           "localhost veya yerel ağ IP adresi kullanmayın; HTTPS tünel adresinizi GOOGLE_CALLBACK_URL olarak ayarlayın.",
       });
     }
-    console.info(`[google-auth] Mobil callback URI: ${callbackURL}`);
+    console.info(`[google-auth] Mobil callback URI: ${callbackURL} (production: ${isProduction})`);
   }
 
   // State içine mobile_redirect_uri ve kullanılan callbackURL'i encode ediyoruz

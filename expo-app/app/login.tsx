@@ -1,10 +1,20 @@
-import React, { useState } from "react";
-import { View, Text, Pressable, ActivityIndicator, Alert, Platform } from "react-native";
+import React, { useState, useEffect } from "react";
+import { View, Text, Pressable, ActivityIndicator, Alert, Platform, Switch, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import { API_BASE, apiFetch } from "../src/api";
+import {
+  API_BASE,
+  API_MODE,
+  apiFetch,
+  setApiMode,
+  loadApiMode,
+  getLocalIp,
+  getAutoDetectedIp,
+  getCustomLocalIp,
+  setCustomLocalIp,
+} from "../src/api";
 import { setToken } from "../src/auth";
 import { profileComplete, type SessionUser } from "../src/types";
 
@@ -14,6 +24,41 @@ WebBrowser.maybeCompleteAuthSession();
 export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [isRemote, setIsRemote] = useState(API_MODE === "remote");
+  const [currentApiBase, setCurrentApiBase] = useState(API_BASE);
+  const [localIpInput, setLocalIpInput] = useState("");
+  const [showIpEditor, setShowIpEditor] = useState(false);
+
+  // Uygulama açılışında kaydedilmiş modu yükle
+  useEffect(() => {
+    loadApiMode().then(() => {
+      setIsRemote(API_MODE === "remote");
+      setCurrentApiBase(API_BASE);
+      // Manuel kayıtlı IP varsa göster, yoksa otomatik algılananı göster
+      const savedIp = getCustomLocalIp();
+      setLocalIpInput(savedIp || getAutoDetectedIp());
+    });
+  }, []);
+
+  const toggleBackend = async (value: boolean) => {
+    const mode = value ? "remote" : "local";
+    await setApiMode(mode);
+    setIsRemote(value);
+    setCurrentApiBase(API_BASE);
+  };
+
+  const handleSaveLocalIp = async () => {
+    const ip = localIpInput.trim();
+    if (!ip) {
+      // Boş bırakılırsa otomatik algılamaya dön
+      await setCustomLocalIp(null);
+      setLocalIpInput(getAutoDetectedIp());
+    } else {
+      await setCustomLocalIp(ip);
+    }
+    setCurrentApiBase(API_BASE);
+    Alert.alert("Kaydedildi", `Lokal API: ${API_BASE}`);
+  };
 
   const navigateForUser = (user: SessionUser) => {
     if (!profileComplete(user)) {
@@ -209,10 +254,74 @@ export default function LoginScreen() {
           Test girişi ile doğrudan hesabınıza bağlanabilir ve tüm özellikleri test edebilirsiniz.
         </Text>
 
-        {/* Debug info */}
-        <Text className="mt-4 text-center text-[10px] text-zinc-700">
-          API: {API_BASE}
-        </Text>
+        {/* Backend Seçimi Toggle */}
+        <View className="mt-4 w-full bg-zinc-900/80 rounded-xl px-4 py-3 gap-2">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 mr-3">
+              <Text className="text-xs font-semibold text-zinc-300">
+                {isRemote ? "☁️ Render (Production)" : "💻 Lokal Sunucu"}
+              </Text>
+              <Text className="text-[10px] text-zinc-500 mt-0.5" numberOfLines={1}>
+                {currentApiBase}
+              </Text>
+            </View>
+            <View className="flex-row items-center gap-2">
+              <Text className="text-[10px] text-zinc-500">Lokal</Text>
+              <Switch
+                value={isRemote}
+                onValueChange={toggleBackend}
+                trackColor={{ false: "#3b82f6", true: "#22c55e" }}
+                thumbColor="#ffffff"
+              />
+              <Text className="text-[10px] text-zinc-500">Render</Text>
+            </View>
+          </View>
+          {!isRemote && (
+            <>
+              <Text className="text-[10px] text-amber-400/80">
+                ⚠️ Lokal modda Google OAuth çalışmaz. Test girişini kullanın.
+              </Text>
+              {/* Lokal IP Düzenleme */}
+              <Pressable onPress={() => setShowIpEditor(!showIpEditor)}>
+                <Text className="text-[10px] text-blue-400 underline mt-1">
+                  {showIpEditor ? "IP düzenleyiciyi kapat" : "📡 Sunucu IP'sini değiştir"}
+                </Text>
+              </Pressable>
+              {showIpEditor && (
+                <View className="mt-2 gap-2">
+                  <Text className="text-[10px] text-zinc-400">
+                    Otomatik algılanan: {getAutoDetectedIp()}
+                  </Text>
+                  <View className="flex-row items-center gap-2">
+                    <TextInput
+                      value={localIpInput}
+                      onChangeText={setLocalIpInput}
+                      placeholder="192.168.1.100"
+                      placeholderTextColor="#71717a"
+                      keyboardType="numeric"
+                      className="flex-1 h-9 bg-zinc-800 rounded-lg px-3 text-xs text-white border border-zinc-700"
+                    />
+                    <Pressable
+                      onPress={handleSaveLocalIp}
+                      className="h-9 px-4 items-center justify-center rounded-lg bg-blue-600 active:bg-blue-700"
+                    >
+                      <Text className="text-xs font-semibold text-white">Kaydet</Text>
+                    </Pressable>
+                  </View>
+                  <Pressable
+                    onPress={async () => {
+                      await setCustomLocalIp(null);
+                      setLocalIpInput(getAutoDetectedIp());
+                      setCurrentApiBase(API_BASE);
+                    }}
+                  >
+                    <Text className="text-[10px] text-zinc-500 underline">Otomatik algılamaya dön</Text>
+                  </Pressable>
+                </View>
+              )}
+            </>
+          )}
+        </View>
 
         {/* Manual session check button in case user completed web login */}
         <Pressable
@@ -225,3 +334,4 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
+
